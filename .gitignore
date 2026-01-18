@@ -28,3 +28,4 @@ ui/src-tauri/Cargo.lock
 
 # Local data
 models/
+.env
