@@ -21,6 +21,8 @@ use llama_cpp_2::sampling::LlamaSampler;
 use parking_lot::RwLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tauri::api::notification::Notification;
+use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
@@ -1590,6 +1592,62 @@ async fn spawn_server(state: AppState) -> anyhow::Result<(SocketAddr, JoinHandle
 }
 
 // ============================================================================
+// System tray + notifications
+// ============================================================================
+
+fn build_tray() -> SystemTray {
+    let open = CustomMenuItem::new("open".to_string(), "Open Aurora");
+    let quit = CustomMenuItem::new("quit".to_string(), "Quit");
+
+    let menu = SystemTrayMenu::new()
+        .add_item(open)
+        .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(quit);
+
+    let mut tray = SystemTray::new().with_menu(menu);
+    #[cfg(target_os = "macos")]
+    {
+        tray = tray.with_icon_as_template(true);
+    }
+    tray
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn hide_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_window("main") {
+        let _ = window.hide();
+    }
+}
+
+fn toggle_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_window("main") {
+        match window.is_visible() {
+            Ok(true) => hide_main_window(app),
+            Ok(false) => show_main_window(app),
+            Err(_) => show_main_window(app),
+        }
+    }
+}
+
+fn handle_tray_event(app: &tauri::AppHandle, event: SystemTrayEvent) {
+    match event {
+        SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
+            "open" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        },
+        SystemTrayEvent::LeftClick { .. } => toggle_main_window(app),
+        _ => {}
+    }
+}
+
+// ============================================================================
 // Tauri commands
 // ============================================================================
 
@@ -1644,6 +1702,15 @@ async fn start_sidecar(
     }
 }
 
+#[tauri::command]
+fn send_notification(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+    Notification::new(&app.config().tauri.bundle.identifier)
+        .title(&title)
+        .body(&body)
+        .show()
+        .map_err(|e| e.to_string())
+}
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -1676,7 +1743,9 @@ fn main() {
     tauri::Builder::default()
         .manage(log_state)
         .manage(log_buffer)
-        .invoke_handler(tauri::generate_handler![start_sidecar])
+        .invoke_handler(tauri::generate_handler![start_sidecar, send_notification])
+        .system_tray(build_tray())
+        .on_system_tray_event(|app, event| handle_tray_event(app, event))
         .setup(move |_app| {
             // Auto-start the backend server
             let state = auto_start_state.clone();

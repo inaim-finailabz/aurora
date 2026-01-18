@@ -47,10 +47,32 @@ Windows (PowerShell, admin):
 .\scripts\install-cli.ps1 -Source "C:\path\to\aurora.exe"
 ```
 
+Windows (PowerShell, user-only):
+```powershell
+.\scripts\install-cli-user.ps1 -Source "C:\path\to\aurora.exe"
+```
+
 Verify:
 ```bash
 aurora status
 aurora pull TheBloke/Llama-2-7B-GGUF:Q4_K_M
+```
+
+## Uninstall scripts
+
+macOS:
+```bash
+./scripts/uninstall-macos.sh
+```
+
+Linux:
+```bash
+./scripts/uninstall-linux.sh
+```
+
+Windows (PowerShell):
+```powershell
+.\scripts\uninstall-windows.ps1
 ```
 
 ### Platform-specific builds
@@ -61,20 +83,24 @@ macOS:
 - Prereqs: Xcode Command Line Tools (`xcode-select --install`)
 - App bundle: `pnpm --prefix ui run build`
 - CLI binary: `cd ui/src-tauri && cargo build --bin aurora --release`
+- Prepare CLI sidecar for the app bundle: `./scripts/prepare-sidecar.sh`
 - Output: `ui/src-tauri/target/release/bundle/macos/Aurora.app`
 
 Windows:
 - Prereqs: Visual Studio Build Tools + Windows SDK (MSVC), Node.js 20+, pnpm, Rust
 - App installers: `pnpm --prefix ui run build`
 - CLI binary: `cd ui/src-tauri && cargo build --bin aurora --release`
+- Prepare CLI sidecar for the installers: `.\scripts\prepare-sidecar.ps1`
 - Output: `ui/src-tauri/target/release/bundle/msi/*.msi` and `ui/src-tauri/target/release/bundle/nsis/*.exe`
 
 Linux (Ubuntu/Debian):
 - Prereqs: `sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf`
 - App bundles: `pnpm --prefix ui run build`
+- CLI binary: `cd ui/src-tauri && cargo build --bin aurora --release`
+- Prepare CLI sidecar for the installers: `./scripts/prepare-sidecar.sh`
 - Output: `ui/src-tauri/target/release/bundle/deb/*.deb` and `ui/src-tauri/target/release/bundle/appimage/*.AppImage`
 
-Note: If you only want the `.app` bundle on macOS, keep `ui/src-tauri/tauri.conf.json` at `bundle.targets = ["app"]`. For installers (DMG/MSI/NSIS/DEB/AppImage), include the relevant targets.
+Note: `ui/src-tauri/tauri.conf.json` includes installer targets for Windows and Linux and bundles the CLI as a sidecar via `externalBin`. If the `aurora-<target-triple>` sidecar file is missing, the Tauri bundle step will fail — run the prepare script above or remove `externalBin` when you don’t need the CLI bundled.
 
 ## Contributing
 Please read `CONTRIBUTING.md` for contribution guidelines.

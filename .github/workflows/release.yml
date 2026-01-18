@@ -41,6 +41,11 @@ jobs:
         working-directory: ui/src-tauri
         run: cargo build --bin aurora --release
 
+      - name: Prepare CLI sidecar (macOS)
+        run: |
+          TARGET=$(rustc -vV | awk '/^host: /{print $2}')
+          cp ui/src-tauri/target/release/aurora ui/src-tauri/aurora-$TARGET
+
       - name: Build Tauri app (macOS)
         working-directory: ui
         run: pnpm tauri build
@@ -86,6 +91,11 @@ jobs:
       - name: Build CLI binary (Windows)
         working-directory: ui/src-tauri
         run: cargo build --bin aurora --release
+
+      - name: Prepare CLI sidecar (Windows)
+        run: |
+          $target = (rustc -vV | Select-String '^host:' | ForEach-Object { $_.ToString().Split()[1] })
+          Copy-Item ui/src-tauri/target/release/aurora.exe "ui/src-tauri/aurora-$target.exe"
 
       - name: Build Tauri app (Windows)
         working-directory: ui
@@ -137,6 +147,11 @@ jobs:
       - name: Build CLI binary (Linux)
         working-directory: ui/src-tauri
         run: cargo build --bin aurora --release
+
+      - name: Prepare CLI sidecar (Linux)
+        run: |
+          TARGET=$(rustc -vV | awk '/^host: /{print $2}')
+          cp ui/src-tauri/target/release/aurora ui/src-tauri/aurora-$TARGET
 
       - name: Build Tauri app (Linux)
         working-directory: ui

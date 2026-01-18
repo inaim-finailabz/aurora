@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import uiPkg from "../../package.json";
+import * as React from "react";
+import { useState } from "react";
+import * as uiPkg from "../../package.json";
 
 const MIT_LICENSE = `MIT License
 
@@ -74,7 +75,7 @@ export default function AboutModal({ open, onClose }: { open: boolean; onClose: 
         </p>
 
         {/* Company Info */}
-        <div style={{ background: "var(--panel-bg)", padding: 16, borderRadius: 8, marginBottom: 16 }}>
+        <div style={{ background: "var(--bg-secondary)", padding: 16, borderRadius: 8, marginBottom: 16 }}>
           <h4 style={{ margin: "0 0 12px 0" }}>Company Information</h4>
           <div style={{ display: "grid", gap: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -83,14 +84,14 @@ export default function AboutModal({ open, onClose }: { open: boolean; onClose: 
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span><strong>Website:</strong></span>
-              <a href="https://finailabz.com" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+              <a href="https://finailabz.com" target="_blank" rel="noreferrer" style={{ color: "var(--accent-primary)" }}>
                 finailabz.com
               </a>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span><strong>Email:</strong></span>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <a href="mailto:contact@finailabz.com" style={{ color: "var(--accent)" }}>
+                <a href="mailto:contact@finailabz.com" style={{ color: "var(--accent-primary)" }}>
                   contact@finailabz.com
                 </a>
                 <button
@@ -104,7 +105,7 @@ export default function AboutModal({ open, onClose }: { open: boolean; onClose: 
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span><strong>Support:</strong></span>
-              <a href="mailto:support@finailabz.com" style={{ color: "var(--accent)" }}>
+              <a href="mailto:support@finailabz.com" style={{ color: "var(--accent-primary)" }}>
                 support@finailabz.com
               </a>
             </div>
@@ -112,7 +113,7 @@ export default function AboutModal({ open, onClose }: { open: boolean; onClose: 
         </div>
 
         {/* License Section */}
-        <div style={{ background: "var(--panel-bg)", padding: 16, borderRadius: 8, marginBottom: 16 }}>
+        <div style={{ background: "var(--bg-secondary)", padding: 16, borderRadius: 8, marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <h4 style={{ margin: 0 }}>License</h4>
             <div style={{ display: "flex", gap: 8 }}>
@@ -129,7 +130,7 @@ export default function AboutModal({ open, onClose }: { open: boolean; onClose: 
           </p>
           {showLicense && (
             <pre style={{
-              background: "var(--bg)",
+              background: "var(--bg-tertiary)",
               padding: 12,
               borderRadius: 6,
               marginTop: 12,
@@ -145,7 +146,7 @@ export default function AboutModal({ open, onClose }: { open: boolean; onClose: 
         </div>
 
         {/* Copyright */}
-        <p style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", margin: "16px 0 8px 0" }}>
+        <p style={{ textAlign: "center", fontSize: 12, color: "var(--text-tertiary)", margin: "16px 0 8px 0" }}>
           Copyright © 2026 FinAI Labz. All rights reserved.
         </p>
 
@@ -153,6 +154,18 @@ export default function AboutModal({ open, onClose }: { open: boolean; onClose: 
         <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
           <a className="pick-btn" href="https://github.com/inaim-finailabz/aurora" target="_blank" rel="noreferrer">
             GitHub
+          </a>
+          <a className="pick-btn" href="https://github.com/inaim-finailabz/aurora/issues" target="_blank" rel="noreferrer">
+            Issues
+          </a>
+          <a className="pick-btn" href="https://x.com/finailabz" target="_blank" rel="noreferrer">
+            X
+          </a>
+          <a className="pick-btn" href="https://instagram.com/finailabz" target="_blank" rel="noreferrer">
+            Instagram
+          </a>
+          <a className="pick-btn" href="https://discord.gg/finailabz" target="_blank" rel="noreferrer">
+            Discord
           </a>
           <a className="pick-btn" href="https://finailabz.com/aurora/docs" target="_blank" rel="noreferrer">
             Documentation
