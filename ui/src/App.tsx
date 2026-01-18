@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   API_BASE,
@@ -13,6 +13,7 @@ import {
   saveSettings,
   detectGgufFromRepo,
   listAiWikiModels,
+  logToBackend,
 } from "./api";
 import "./style.css";
 import { useI18n } from "./i18n";
@@ -27,7 +28,12 @@ import SettingsIcon from "./components/icons/SettingsIcon";
 import LogsIcon from "./components/icons/LogsIcon";
 import HelpIcon from "./components/icons/HelpIcon";
 import TerminalIcon from "./components/icons/TerminalIcon";
+import ChatMessage from "./components/ChatMessage";
+import FileUpload, { Attachment } from "./components/FileUpload";
 import { invoke } from "@tauri-apps/api/tauri";
+
+// Lazy load XTerminal to avoid SSR issues
+const XTerminal = lazy(() => import("./components/XTerminal"));
 
 const navIcons: Record<string, any> = {
   home: HomeIcon,
@@ -63,8 +69,11 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
   });
   const [improved, setImproved] = useState<string>("");
   const [model, setModel] = useState(defaultModel || "");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const models = useQuery({ queryKey: ["models"], queryFn: listModels });
   const { t } = useI18n();
+  const chatWindowRef = useRef<HTMLDivElement>(null);
+
   const chat = useMutation({
     mutationFn: chatOnce,
     onSuccess: (data) => {
@@ -78,16 +87,35 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
     }
   }, [models.data, model]);
 
+  useEffect(() => {
+    if (chatWindowRef.current) {
+      chatWindowRef.current.scrollTop = chatWindowRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   const sendPrompt = () => {
     if (!prompt.trim()) return;
     const newMessages: Message[] = [...messages, { role: "user" as const, content: prompt }];
     setMessages(newMessages);
-    setPrompt("");
-    chat.mutate({
+
+    // Build payload with attachments if any
+    const payload: any = {
       model: model || defaultModel,
       messages: newMessages,
       stream: false,
-    });
+    };
+
+    if (attachments.length > 0) {
+      payload.attachments = attachments.map((att) => ({
+        data_url: att.data_url,
+        name: att.name,
+        type: att.mime_type,
+      }));
+    }
+
+    setPrompt("");
+    setAttachments([]);
+    chat.mutate(payload);
   };
 
   const [sideCollapsed, setSideCollapsed] = useState(false);
@@ -143,6 +171,14 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
     setResizing(true);
   };
 
+  const handleFilesSelected = (files: Attachment[]) => {
+    setAttachments((prev) => [...prev, ...files]);
+  };
+
+  const handleRemoveAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  };
+
   return (
     <div className="panel chat-panel">
       <div className="chat-panel-header">
@@ -165,13 +201,26 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
 
       <div className="chat-layout">
         <main className="chat-main">
-          <div className="chat-window">
-            {messages.map((m, idx) => (
-              <div key={idx} className={`message ${m.role}`}>
-                <strong>{m.role === "user" ? "You" : "Assistant"}:</strong> {m.content}
+          <div className="chat-window" ref={chatWindowRef}>
+            {messages.length === 0 && (
+              <div className="chat-empty-state">
+                <div className="chat-empty-icon">
+                  <AuroraIcon style={{ width: 48, height: 48, opacity: 0.5 }} />
+                </div>
+                <p>Start a conversation by typing a message below</p>
+                <p className="status">Tip: You can attach images for vision AI models</p>
               </div>
+            )}
+            {messages.map((m, idx) => (
+              <ChatMessage key={idx} role={m.role} content={m.content} />
             ))}
           </div>
+
+          <FileUpload
+            onFilesSelected={handleFilesSelected}
+            attachments={attachments}
+            onRemoveAttachment={handleRemoveAttachment}
+          />
 
           <label>{t("promptLabel")}</label>
           <textarea
@@ -179,6 +228,12 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder={t("promptPlaceholder")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                sendPrompt();
+              }
+            }}
           />
 
           <div className="input-row">
@@ -207,6 +262,7 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
             <button className="primary" onClick={sendPrompt} disabled={chat.isPending}>
               {chat.isPending ? t("thinking") : t("send")}
             </button>
+            <span className="status" style={{ fontSize: 11 }}>Ctrl+Enter to send</span>
             <p className="status">{chat.isError ? (chat.error as Error).message : ""}</p>
           </div>
         </main>
@@ -220,7 +276,7 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
         />
 
         <aside
-          className={`chat-side ${sideCollapsed ? "collapsed" : ""}`} 
+          className={`chat-side ${sideCollapsed ? "collapsed" : ""}`}
           aria-hidden={sideCollapsed}
           style={{ width: sideCollapsed ? 44 : sideWidth }}
         >
@@ -351,9 +407,11 @@ function ModelsPanel() {
     onSuccess: (data) => {
       setPullStatus({ type: "success", message: `Pulling ${data.name}...` });
       queryClient.invalidateQueries({ queryKey: ["models"] });
+      logToBackend(`[PULL] Success: Started pulling ${data.name}`);
     },
     onError: (err: Error) => {
       setPullStatus({ type: "error", message: err.message });
+      logToBackend(`[PULL] Error: ${err.message}`);
     },
   });
   const remove = useMutation({
@@ -382,10 +440,12 @@ function ModelsPanel() {
     if (!input) return;
 
     setPullStatus({ type: "detecting", message: "Detecting GGUF files..." });
+    logToBackend(`[PULL] Starting detection for: ${input}`);
 
     try {
       const detected = await detectGgufFromRepo(input);
       setPullStatus({ type: "pulling", message: `Found ${detected.filename}, pulling...` });
+      logToBackend(`[PULL] Detected file: ${detected.filename} from ${detected.repo_id}`);
       pull.mutate({
         name: detected.name,
         repo_id: detected.repo_id,
@@ -395,7 +455,16 @@ function ModelsPanel() {
         source: (detected as any).source,
       });
     } catch (e: any) {
-      setPullStatus({ type: "error", message: e.message || String(e) });
+      const errMsg = e.message || String(e);
+      setPullStatus({ type: "error", message: errMsg });
+      logToBackend(`[PULL] Detection failed: ${errMsg}`);
+
+      // Provide helpful error messages
+      if (errMsg.includes("401") || errMsg.includes("private")) {
+        setPullStatus({ type: "error", message: `Access denied. The repository may be private or require authentication. Error: ${errMsg}` });
+      } else if (errMsg.includes("404") || errMsg.includes("not found")) {
+        setPullStatus({ type: "error", message: `Repository not found. Check the name and try again. Error: ${errMsg}` });
+      }
     }
   };
 
@@ -409,6 +478,7 @@ function ModelsPanel() {
     const repoId = m.id;
     setPullInput(repoId);
     setPullStatus({ type: "detecting", message: "Detecting GGUF files..." });
+    logToBackend(`[PULL] Quick pull from catalog: ${repoId}`);
 
     try {
       // If catalog has gguf info, use it directly
@@ -416,10 +486,12 @@ function ModelsPanel() {
       if (gguf) {
         const name = m.title || repoId.split("/").pop() || repoId;
         setPullStatus({ type: "pulling", message: `Pulling ${name}...` });
+        logToBackend(`[PULL] Using catalog GGUF info: ${gguf}`);
         pull.mutate({ name, repo_id: repoId, filename: gguf });
       } else {
         const detected = await detectGgufFromRepo(repoId);
         setPullStatus({ type: "pulling", message: `Found ${detected.filename}, pulling...` });
+        logToBackend(`[PULL] Auto-detected: ${detected.filename}`);
         pull.mutate({
           name: detected.name,
           repo_id: detected.repo_id,
@@ -431,6 +503,7 @@ function ModelsPanel() {
       }
     } catch (e: any) {
       setPullStatus({ type: "error", message: e.message || String(e) });
+      logToBackend(`[PULL] Catalog pull failed: ${e.message}`);
     }
   };
 
@@ -458,7 +531,7 @@ function ModelsPanel() {
             className="pull-input"
           />
           <button
-            className="primary"
+            className="primary pull-btn"
             onClick={handlePull}
             disabled={isPulling || !pullInput.trim()}
           >
@@ -475,7 +548,7 @@ function ModelsPanel() {
           </p>
         )}
         <p className="status" style={{ marginTop: 8 }}>
-          Auto-detects the best GGUF file from the repository
+          Auto-detects the best GGUF file from the repository. Use :tag for specific versions (e.g., repo:Q4_K_M)
         </p>
       </div>
 
@@ -661,16 +734,34 @@ function SettingsPanel({ defaults }: { defaults: any }) {
 }
 
 function BottomLogsPanel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  const [lines, setLines] = useState<string[]>([]);
+  const [lines, setLines] = useState<{ time: string; level: string; message: string }[]>([]);
   const [streamError, setStreamError] = useState<string>("");
-  const [filter, setFilter] = useState<"all" | "request" | "response" | "error">("all");
+  const [filter, setFilter] = useState<"all" | "request" | "response" | "error" | "cli">("all");
   const { t } = useI18n();
   const logsEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const stop = logsStream(
       (line) => {
-        setLines((prev) => [...prev.slice(-500), line]);
+        const now = new Date();
+        const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}.${now.getMilliseconds().toString().padStart(3, "0")}`;
+
+        // Determine log level
+        let level = "info";
+        const lower = line.toLowerCase();
+        if (lower.includes("error") || lower.includes("failed") || lower.includes("✗")) {
+          level = "error";
+        } else if (lower.includes("warn")) {
+          level = "warn";
+        } else if (lower.includes("→") || lower.includes("request") || lower.includes("sending")) {
+          level = "request";
+        } else if (lower.includes("←") || lower.includes("response") || lower.includes("received")) {
+          level = "response";
+        } else if (lower.includes("[cli]") || lower.includes("[pull]") || lower.includes("[detect]")) {
+          level = "cli";
+        }
+
+        setLines((prev) => [...prev.slice(-500), { time, level, message: line }]);
         setStreamError("");
       },
       (err) => {
@@ -689,10 +780,10 @@ function BottomLogsPanel({ collapsed, onToggle }: { collapsed: boolean; onToggle
   const filteredLines = useMemo(() => {
     if (filter === "all") return lines;
     return lines.filter((line) => {
-      const lower = line.toLowerCase();
-      if (filter === "request") return lower.includes("request") || lower.includes("→") || lower.includes("sending");
-      if (filter === "response") return lower.includes("response") || lower.includes("←") || lower.includes("received");
-      if (filter === "error") return lower.includes("error") || lower.includes("failed") || lower.includes("warn");
+      if (filter === "request") return line.level === "request";
+      if (filter === "response") return line.level === "response";
+      if (filter === "error") return line.level === "error" || line.level === "warn";
+      if (filter === "cli") return line.level === "cli";
       return true;
     });
   }, [lines, filter]);
@@ -715,10 +806,11 @@ function BottomLogsPanel({ collapsed, onToggle }: { collapsed: boolean; onToggle
                 value={filter}
                 onChange={(e) => setFilter(e.target.value as any)}
               >
-                <option value="all">All</option>
+                <option value="all">All Logs</option>
                 <option value="request">Requests</option>
                 <option value="response">Responses</option>
                 <option value="error">Errors</option>
+                <option value="cli">CLI/Pull</option>
               </select>
               <button className="logs-action-btn" onClick={clearLogs} title="Clear logs">
                 Clear
@@ -734,19 +826,16 @@ function BottomLogsPanel({ collapsed, onToggle }: { collapsed: boolean; onToggle
         <div className="bottom-logs-content">
           {streamError && <div className="logs-stream-error">{streamError}</div>}
           <div className="bottom-logs-output">
-            {filteredLines.map((line, idx) => {
-              const isError = line.toLowerCase().includes("error") || line.toLowerCase().includes("failed");
-              const isRequest = line.includes("→") || line.toLowerCase().includes("request");
-              const isResponse = line.includes("←") || line.toLowerCase().includes("response");
-              return (
-                <div
-                  key={idx}
-                  className={`log-line ${isError ? "log-error" : ""} ${isRequest ? "log-request" : ""} ${isResponse ? "log-response" : ""}`}
-                >
-                  {line}
-                </div>
-              );
-            })}
+            {filteredLines.map((line, idx) => (
+              <div
+                key={idx}
+                className={`log-line log-${line.level}`}
+              >
+                <span className="log-time">{line.time}</span>
+                <span className={`log-level log-level-${line.level}`}>[{line.level.toUpperCase()}]</span>
+                <span className="log-message">{line.message}</span>
+              </div>
+            ))}
             <div ref={logsEndRef} />
           </div>
         </div>
@@ -757,113 +846,15 @@ function BottomLogsPanel({ collapsed, onToggle }: { collapsed: boolean; onToggle
 
 function TerminalPanel() {
   const { t } = useI18n();
-  const [output, setOutput] = useState<Array<{ prompt: string; result: string }>>([]);
-  const [cmd, setCmd] = useState("");
-  const endRef = useRef<HTMLDivElement | null>(null);
-
-  const runCmd = async () => {
-    const val = cmd.trim();
-    if (!val) return;
-    let parts = val.split(/\s+/);
-    if (parts[0] === "aurora") {
-      parts = parts.slice(1);
-    }
-    if (!parts.length || !parts[0]) {
-      setOutput((prev) => [...prev.slice(-200), { prompt: `$ ${val}`, result: t("terminalHelp") }]);
-      setCmd("");
-      return;
-    }
-    const [verb, ...rest] = parts;
-    let line = "";
-    try {
-      if (verb === "help" || verb === "-h" || verb === "--help") {
-        line = `Commands:
-  list              - List available models
-  pull <name> <repo> <filename> [subfolder]
-                    - Pull model from HuggingFace
-  pull:tiny         - Pull TinyLlama-1.1B (quick test model)
-  run <name>        - Load and run a model
-  help              - Show this help`;
-      } else if (verb === "list") {
-        const data = await listModels();
-        line = JSON.stringify(data.models || [], null, 2);
-      } else if (verb === "pull:tiny" || (verb === "pull" && rest[0] === "tiny")) {
-        // Quick pull for TinyLlama (great for testing)
-        const res = await pullModel({
-          name: "tinyllama",
-          repo_id: "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
-          filename: "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
-        });
-        line = JSON.stringify(res);
-      } else if (verb === "pull") {
-        if (rest.length === 1) {
-          const repo = rest[0];
-          const detected = await detectGgufFromRepo(repo);
-          const res = await pullModel({
-            name: detected.name,
-            repo_id: detected.repo_id,
-            filename: detected.filename,
-            subfolder: detected.subfolder,
-          });
-          line = JSON.stringify({ ...res, selected: detected.filename, note: "auto-picked smallest GGUF" }, null, 2);
-        } else {
-          const [name, repo, filename, subfolder] = rest;
-          if (!name || !repo || !filename) {
-            throw new Error("Usage: pull <repo>  OR pull <name> <repo> <filename> [subfolder]\n  or: pull:tiny (for quick test)");
-          }
-          const res = await pullModel({ name, repo_id: repo, filename, subfolder });
-          line = JSON.stringify(res);
-        }
-      } else if (verb === "run") {
-        const [name] = rest;
-        if (!name) throw new Error("Usage: run <name>");
-        // Trigger a lightweight chat to ensure load
-        await chatOnce({ model: name, messages: [{ role: "user", content: "" }], stream: false });
-        line = JSON.stringify({ status: "ok", model: name });
-      } else {
-        throw new Error(`Unknown command: ${verb}\nType 'help' for available commands`);
-      }
-    } catch (e: any) {
-      line = e.message || String(e);
-    }
-    setOutput((prev) => [...prev.slice(-200), { prompt: `$ ${val}`, result: line }]);
-    setCmd("");
-  };
-
-  useEffect(() => {
-    if (endRef.current) {
-      endRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [output]);
 
   return (
-    <div className="panel">
+    <div className="panel terminal-panel-container">
       <h2>{t("terminalTitle")}</h2>
       <p className="status">{t("terminalHelp")}</p>
-      <div className="terminal-shell">
-        <div className="terminal-output">
-          {output.map((entry, idx) => (
-            <div key={idx} className="terminal-block">
-              <pre className="terminal-prompt">{entry.prompt}</pre>
-              <pre className="terminal-result">{entry.result}</pre>
-            </div>
-          ))}
-          <div ref={endRef} />
-        </div>
-        <div className="terminal-divider" />
-        <div className="terminal-input-row">
-          <input
-            value={cmd}
-            onChange={(e) => setCmd(e.target.value)}
-            placeholder={t("terminalPlaceholder")}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") runCmd();
-            }}
-          />
-          <button className="pick-btn" onClick={runCmd}>
-            Run
-          </button>
-        </div>
+      <div className="xterm-wrapper">
+        <Suspense fallback={<div className="terminal-loading">Loading terminal...</div>}>
+          <XTerminal />
+        </Suspense>
       </div>
     </div>
   );
@@ -872,7 +863,7 @@ function TerminalPanel() {
 function HelpPanel() {
   const { t } = useI18n();
   const plansUrl = "https://subscription-portal.finailabz.com";
-  return ( 
+  return (
     <div className="panel">
       <h2>{t("helpTitle")}</h2>
       <div className="list">
@@ -899,6 +890,28 @@ function HelpPanel() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Hamburger icon component
+function HamburgerIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
+// Info icon for About button when collapsed
+function InfoIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
   );
 }
 
@@ -969,7 +982,7 @@ function Layout() {
           aria-label="Toggle sidebar (double-click to resize)"
           title="Toggle sidebar (double-click to start resizing)"
         >
-          ≡
+          <HamburgerIcon />
         </button>
         <div className="brand">
           <div className="brand-logo-badge">A</div>
@@ -998,7 +1011,10 @@ function Layout() {
                   {Icon ? <Icon className="nav-icon" /> : <AuroraIcon className="nav-icon" />}
                 </div>
               ) : (
-                label
+                <>
+                  {Icon && <Icon className="nav-icon" style={{ marginRight: 8 }} />}
+                  {label}
+                </>
               )}
             </div>
           );
@@ -1038,7 +1054,15 @@ function Layout() {
         </div>
 
         <div className="sidebar-footer">
-          {collapsed ? null : (
+          {collapsed ? (
+            <button
+              className="about-icon-btn"
+              onClick={() => setShowAbout(true)}
+              title="About Aurora"
+            >
+              <InfoIcon />
+            </button>
+          ) : (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <div style={{ fontSize: 12, color: "var(--muted)" }}>© 2026 FinAI Labz</div>
               <button className="pick-btn" onClick={() => setShowAbout(true)}>
@@ -1062,7 +1086,7 @@ function Layout() {
           aria-label="Toggle navigation"
           onClick={() => setCollapsed((v) => !v)}
         >
-          ☰
+          <HamburgerIcon />
         </button>
         {healthQuery.isError && (
           <div className="offline-banner">
