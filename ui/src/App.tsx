@@ -548,7 +548,7 @@ function ModelsPanel() {
           </p>
         )}
         <p className="status" style={{ marginTop: 8 }}>
-          Auto-detects the best GGUF file from the repository. Use :tag for specific versions (e.g., repo:Q4_K_M)
+          Auto-detects the best GGUF file from the repository. Use :tag for specific versions (e.g., TheBloke/Llama-2-7B-GGUF:Q4_K_M)
         </p>
       </div>
 
