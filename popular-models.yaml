@@ -1,0 +1,62 @@
+# Popular Models Configuration
+# This file contains a curated list of popular GGUF models that can be pulled into Aurora
+# Each model entry includes repository information and a description
+
+models:
+  - id: "TheBloke/Llama-2-7B-Chat-GGUF"
+    title: "Llama 2 7B Chat"
+    description: "Meta's Llama 2 7B fine-tuned for chat. Good balance of speed and quality."
+    recommended_quant: "Q4_K_M"
+
+  - id: "TheBloke/Llama-2-13B-Chat-GGUF"
+    title: "Llama 2 13B Chat"
+    description: "Larger Llama 2 model with better quality responses. Requires more RAM."
+    recommended_quant: "Q4_K_M"
+
+  - id: "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
+    title: "Mistral 7B Instruct v0.2"
+    description: "High-quality 7B model with excellent instruction following capabilities."
+    recommended_quant: "Q5_K_M"
+
+  - id: "TheBloke/phi-2-GGUF"
+    title: "Phi-2"
+    description: "Microsoft's compact 2.7B model. Fast and efficient for basic tasks."
+    recommended_quant: "Q4_K_M"
+
+  - id: "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
+    title: "TinyLlama 1.1B"
+    description: "Ultra-lightweight model perfect for testing and low-resource environments."
+    recommended_quant: "Q4_K_M"
+
+  - id: "TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF"
+    title: "Mixtral 8x7B Instruct"
+    description: "Powerful mixture-of-experts model with excellent performance. Requires significant RAM."
+    recommended_quant: "Q4_K_M"
+
+  - id: "TheBloke/CodeLlama-7B-Instruct-GGUF"
+    title: "CodeLlama 7B Instruct"
+    description: "Specialized for code generation and programming tasks."
+    recommended_quant: "Q4_K_M"
+
+  - id: "TheBloke/Neural-Chat-7B-v3-3-GGUF"
+    title: "Neural Chat 7B v3.3"
+    description: "Fine-tuned for conversational AI with good coherence."
+    recommended_quant: "Q4_K_M"
+
+  - id: "TheBloke/OpenHermes-2.5-Mistral-7B-GGUF"
+    title: "OpenHermes 2.5 Mistral 7B"
+    description: "High-quality instruction-following model based on Mistral."
+    recommended_quant: "Q5_K_M"
+
+  - id: "TheBloke/Zephyr-7B-Beta-GGUF"
+    title: "Zephyr 7B Beta"
+    description: "HuggingFace's chat model fine-tuned from Mistral."
+    recommended_quant: "Q4_K_M"
+
+# Usage notes:
+# - All models support the :tag syntax for specific quantizations (e.g., TheBloke/Llama-2-7B-Chat-GGUF:Q4_K_M)
+# - Recommended quantizations balance quality and performance
+# - Q4_K_M: Good quality, moderate size
+# - Q5_K_M: Better quality, larger size
+# - Q8_0: Highest quality, largest size
+# - Smaller quantizations (Q2, Q3) are faster but lower quality

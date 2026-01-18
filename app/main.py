@@ -11,6 +11,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from huggingface_hub import hf_hub_download
 import httpx
+import yaml
 
 from app.config import load_config, save_config
 from app.llama_server import LlamaServerConfig, LlamaServerManager
@@ -184,6 +185,22 @@ def delete_model(name: str) -> Dict[str, Any]:
     registry["models"] = [m for m in models if m.get("name") != name]
     save_registry(app.state.config.registry_path, registry)
     return {"status": "removed", "name": name}
+
+
+@app.get("/api/popular-models")
+def list_popular_models() -> List[Dict[str, Any]]:
+    popular_models_path = Path(__file__).parent.parent / "popular-models.yaml"
+    if not popular_models_path.exists():
+        logger.warning("popular-models.yaml not found at %s", popular_models_path)
+        return []
+
+    try:
+        with open(popular_models_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            return data.get("models", [])
+    except Exception as e:
+        logger.error("Failed to load popular-models.yaml: %s", e)
+        return []
 
 
 @app.get("/api/settings")

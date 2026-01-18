@@ -476,9 +476,10 @@ function ModelsPanel() {
 
   const quickPullFromCatalog = async (m: any) => {
     const repoId = m.id;
-    setPullInput(repoId);
+    const repoWithQuant = m.recommended_quant ? `${repoId}:${m.recommended_quant}` : repoId;
+    setPullInput(repoWithQuant);
     setPullStatus({ type: "detecting", message: "Detecting GGUF files..." });
-    logToBackend(`[PULL] Quick pull from catalog: ${repoId}`);
+    logToBackend(`[PULL] Quick pull from catalog: ${repoWithQuant}`);
 
     try {
       // If catalog has gguf info, use it directly
@@ -489,7 +490,7 @@ function ModelsPanel() {
         logToBackend(`[PULL] Using catalog GGUF info: ${gguf}`);
         pull.mutate({ name, repo_id: repoId, filename: gguf });
       } else {
-        const detected = await detectGgufFromRepo(repoId);
+        const detected = await detectGgufFromRepo(repoWithQuant);
         setPullStatus({ type: "pulling", message: `Found ${detected.filename}, pulling...` });
         logToBackend(`[PULL] Auto-detected: ${detected.filename}`);
         pull.mutate({
@@ -596,6 +597,11 @@ function ModelsPanel() {
                 <div>
                   <div style={{ fontWeight: 700 }}>{m.title || m.id}</div>
                   <div className="status">{m.description || m.id}</div>
+                  {(m as any).recommended_quant && (
+                    <div className="status" style={{ marginTop: 4 }}>
+                      Recommended: <span className="badge">{(m as any).recommended_quant}</span>
+                    </div>
+                  )}
                 </div>
                 <button
                   className="pick-btn"

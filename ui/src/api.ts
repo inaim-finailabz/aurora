@@ -214,11 +214,11 @@ export async function detectGgufFromRepo(repo: string) {
   return { repo_id: repoId, filename, subfolder, name };
 }
 
-// Non-blocking catalog fetch from FinAI AI-Wiki
+// Fetch popular models from local configuration
 export async function listAiWikiModels() {
-  const res = await fetch("https://ai-wiki.finailabz.com/models.json");
-  if (!res.ok) throw new Error(`AI-Wiki fetch failed: ${res.status}`);
-  return (await res.json()) as Array<{ id: string; title?: string; description?: string; gguf?: string }>;
+  const res = await fetch(`${API_BASE}/api/popular-models`);
+  if (!res.ok) throw new Error(`Popular models fetch failed: ${res.status}`);
+  return (await res.json()) as Array<{ id: string; title?: string; description?: string; gguf?: string; recommended_quant?: string }>;
 }
 
 export async function chatOnce(payload: Record<string, unknown>) {
