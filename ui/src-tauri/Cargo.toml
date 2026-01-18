@@ -1,0 +1,43 @@
+[package]
+name = "aurora-app"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[dependencies]
+tauri = { version = "1.5", features = [ "dialog-all", "fs-all", "shell-all", "http-all", "custom-protocol"] }
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+async-stream = "0.3"
+futures = "0.3"
+anyhow = "1"
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["io"] }
+# Disable default openmp for cross-platform compatibility
+# Metal is auto-enabled on macOS, CUDA on systems with NVIDIA
+llama-cpp-2 = { version = "0.1", default-features = false, features = ["sampler"] }
+reqwest = { version = "0.11", features = ["json", "stream"] }
+chrono = { version = "0.4", features = ["serde"] }
+parking_lot = "0.12"
+dirs = "5"
+regex = "1"
+futures-util = "0.3"
+serde_yaml_ng = "0.10"
+tower-http = { version = "0.5", features = ["cors"] }
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1

@@ -1,0 +1,11 @@
+host: 0.0.0.0
+port: 11435
+storage_dir: /Volumes/ExternalDisk/ollama-models/
+default_model: glm
+models:
+  glm: ./models/glm/GLM-4.7-Q4_K_M-00001-of-00005.gguf
+  minimax-m2: ./models/minimax-m2/MiniMax-M2-Q4_K_M-00001-of-00005.gguf
+llama_server_path: ./llama-server
+llama_server_host: 127.0.0.1
+llama_server_port: 11436
+llama_server_args: ''

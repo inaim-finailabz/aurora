@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+env/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+
+# Node / frontend
+node_modules/
+dist/
+*.log
+
+# Tauri / Rust build artifacts
+ui/node_modules/
+ui/dist/
+ui/.vite/
+ui/src-tauri/target/
+ui/src-tauri/Cargo.lock
+
+# Local data
+models/

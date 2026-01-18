@@ -1,0 +1,168 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+jobs:
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        run: npm i -g pnpm@8
+
+      - name: Install dependencies (UI)
+        run: pnpm install --frozen-lockfile
+        working-directory: ui
+
+      - name: Build web UI
+        run: pnpm build
+        working-directory: ui
+
+      - name: Setup Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Build Tauri bundles (Linux)
+        run: pnpm tauri build
+        working-directory: ui
+
+      - name: Upload Linux bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-bundle
+          path: |
+            ui/src-tauri/target/release/bundle/**
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        run: npm i -g pnpm@8
+
+      - name: Install dependencies (UI)
+        run: pnpm install --frozen-lockfile
+        working-directory: ui
+
+      - name: Build web UI
+        run: pnpm build
+        working-directory: ui
+
+      - name: Setup Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Build Tauri bundles (Windows)
+        run: pnpm tauri build
+        working-directory: ui
+
+      - name: Upload Windows bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-bundle
+          path: |
+            ui/src-tauri/target/release/bundle/**
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        run: npm i -g pnpm@8
+
+      - name: Install dependencies (UI)
+        run: pnpm install --frozen-lockfile
+        working-directory: ui
+
+      - name: Build web UI
+        run: pnpm build
+        working-directory: ui
+
+      - name: Setup Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Build Tauri bundles (macOS)
+        run: pnpm tauri build
+        working-directory: ui
+
+      - name: Upload macOS bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-bundle
+          path: |
+            ui/src-tauri/target/release/bundle/**
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows, build-macos]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-bundle
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-bundle
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-bundle
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          shopt -s globstar || true
+          if [ -d linux-bundle ]; then mv linux-bundle/** release-assets/ || true; fi
+          if [ -d windows-bundle ]; then mv windows-bundle/** release-assets/ || true; fi
+          if [ -d macos-bundle ]; then mv macos-bundle/** release-assets/ || true; fi
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release-assets/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log release files
+        run: ls -la release-assets || true

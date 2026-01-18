@@ -1,0 +1,12 @@
+{
+  "name": "aurora-root",
+  "private": true,
+  "license": "PolyForm Noncommercial 1.0.0",
+  "type": "module",
+  "scripts": {
+    "desktop:dev": "npm --prefix ui run dev",
+    "desktop:build": "npm --prefix ui run build",
+    "desktop:tauri": "npm --prefix ui run tauri -- build",
+    "aurora": "python -m app.cli"
+  }
+} 

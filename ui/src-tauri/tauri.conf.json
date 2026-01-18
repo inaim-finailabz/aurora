@@ -1,0 +1,43 @@
+{
+  "package": {
+    "productName": "Aurora",
+    "version": "0.1.0"
+  },
+  "build": {
+    "beforeDevCommand": "vite dev --host 0.0.0.0 --port 4175",
+    "beforeBuildCommand": "vite build",
+    "devPath": "http://localhost:4175",
+    "distDir": "../dist"
+  },
+  "tauri": {
+    "bundle": {
+      "identifier": "com.finailabz.aurora",
+      "targets": "all"
+    },
+    "windows": [
+      {
+        "title": "Aurora",
+        "width": 1200,
+        "height": 820,
+        "resizable": true
+      }
+    ],
+    "allowlist": {
+      "shell": {
+        "all": true
+      },
+      "fs": {
+        "all": true
+      },
+      "http": {
+        "all": true
+      },
+      "dialog": {
+        "all": true
+      }
+    },
+    "security": {
+      "csp": null
+    }
+  }
+}
