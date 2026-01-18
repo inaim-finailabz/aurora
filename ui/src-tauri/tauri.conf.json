@@ -7,19 +7,45 @@
     "beforeDevCommand": "pnpm run dev:vite",
     "beforeBuildCommand": "pnpm run build:vite",
     "devPath": "http://localhost:4175",
-    "distDir": "../dist"
+    "distDir": "../dist/"
   },
   "tauri": {
     "bundle": {
+      "active": true,
       "identifier": "com.finailabz.aurora",
-      "targets": "all"
+      "targets": "all",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "resources": [
+        "../../popular-models.yaml"
+      ],
+      "shortDescription": "Local LLM Inference Desktop App",
+      "longDescription": "Aurora is a powerful desktop application for running local LLM inference with GGUF models. Built with Rust, React, and Tauri by FinAI Labz.",
+      "copyright": "Copyright (c) 2026 FinAI Labz",
+      "category": "DeveloperTool",
+      "deb": {
+        "depends": []
+      },
+      "macOS": {
+        "entitlements": null,
+        "exceptionDomain": null,
+        "frameworks": [],
+        "minimumSystemVersion": "10.13"
+      }
     },
     "windows": [
       {
         "title": "Aurora",
         "width": 1200,
         "height": 820,
-        "resizable": true
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
       }
     ],
     "allowlist": {

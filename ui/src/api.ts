@@ -221,6 +221,70 @@ export async function listAiWikiModels() {
   return (await res.json()) as Array<{ id: string; title?: string; description?: string; gguf?: string; recommended_quant?: string }>;
 }
 
+// Custom model types
+export interface CustomModelParameters {
+  temperature: number;
+  top_p: number;
+  top_k?: number;
+  repeat_penalty?: number;
+  context_length?: number;
+  max_tokens: number;
+  stop_sequences: string[];
+}
+
+export interface CustomModelConfig {
+  name: string;
+  base_model: string;
+  system_prompt?: string;
+  template?: string;
+  parameters: CustomModelParameters;
+  description?: string;
+}
+
+export interface ModelTemplate {
+  id: string;
+  name: string;
+  description: string;
+  system_prompt: string;
+  template: string;
+  parameters: CustomModelParameters;
+}
+
+// Get available templates for creating custom models
+export async function getTemplates() {
+  return handle<ModelTemplate[]>(await fetch(`${API_BASE}/api/templates`));
+}
+
+// List all custom models
+export async function listCustomModels() {
+  return handle<{ models: CustomModelConfig[] }>(await fetch(`${API_BASE}/api/custom-models`));
+}
+
+// Create a new custom model
+export async function createCustomModel(config: CustomModelConfig) {
+  return handle<{ status: string; name: string }>(
+    await fetch(`${API_BASE}/api/custom-models`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    })
+  );
+}
+
+// Get a specific custom model
+export async function getCustomModel(name: string) {
+  return handle<CustomModelConfig>(
+    await fetch(`${API_BASE}/api/custom-models/${encodeURIComponent(name)}`)
+  );
+}
+
+// Delete a custom model
+export async function deleteCustomModel(name: string) {
+  return handle<{ status: string; name: string }>(
+    await fetch(`${API_BASE}/api/custom-models/${encodeURIComponent(name)}`, { method: "DELETE" })
+  );
+}
+
 export async function chatOnce(payload: Record<string, unknown>) {
   return handle<{ message: { content: string } }>(
     await fetch(`${API_BASE}/api/chat`, {

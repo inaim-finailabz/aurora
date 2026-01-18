@@ -1,6 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
 
-type Locale = "en" | "es" | "fr" | "de" | "ar" | "tr" | "fa" | "zh";
+type Locale = "en" | "es" | "fr" | "de" | "ar" | "tr" | "fa" | "zh" | "hi";
 
 const translations: Record<Locale, Record<string, string>> = {
   en: {
@@ -575,6 +575,87 @@ const translations: Record<Locale, Record<string, string>> = {
     planEnterprise: "企业版：专用 GPU 与自定义配额。",
     planCta: "管理或订阅",
   },
+  hi: {
+    brand: "AURORA • FinAI Labz",
+    navChat: "चैट",
+    navModels: "मॉडल",
+    navPull: "डाउनलोड/खोज",
+    navSettings: "सेटिंग्स",
+    navLogs: "लॉग",
+    modelsHubTitle: "मॉडल · इंस्टॉल और खोजें",
+    manualInstall: "मैन्युअल इंस्टॉल (GGUF)",
+    remove: "हटाएं",
+    removing: "हटा रहे हैं...",
+    removed: "हटा दिया गया",
+    chatTitle: "चैट",
+    completionTitle: "एक-शॉट कंप्लीशन",
+    modelLabel: "मॉडल",
+    promptLabel: "प्रॉम्प्ट",
+    promptPlaceholder: "कुछ पूछें...",
+    send: "भेजें",
+    thinking: "सोच रहा है...",
+    generate: "जनरेट करें",
+    generating: "जनरेट हो रहा है...",
+    output: "आउटपुट",
+    installedModels: "इंस्टॉल किए गए मॉडल",
+    noModels: "अभी कोई मॉडल नहीं। शुरू करने के लिए एक डाउनलोड करें।",
+    source: "स्रोत",
+    pullTitle: "मॉडल डाउनलोड / खोजें",
+    localName: "लोकल नाम",
+    repo: "रेपो",
+    filename: "फाइल नाम",
+    subfolder: "सबफोल्डर (वैकल्पिक)",
+    queue: "डाउनलोड में जोड़ें",
+    queued: "जोड़ दिया गया",
+    error: "त्रुटि",
+    searchLabel: "FinAI कैटलॉग में खोजें (GGUF)",
+    searchPlaceholder: "glm, llama-3, qwen...",
+    noResults: "कोई परिणाम नहीं",
+    use: "उपयोग करें",
+    downloadsLikes: "डाउनलोड · पसंद",
+    searching: "खोज रहे हैं...",
+    settingsTitle: "सेटिंग्स",
+    storageDir: "मॉडल फोल्डर",
+    llamaPath: "llama-server पथ",
+    llamaArgs: "llama-server आर्ग्युमेंट्स",
+    llamaHost: "llama-server होस्ट",
+    llamaPort: "llama-server पोर्ट",
+    defaultModel: "डिफ़ॉल्ट मॉडल",
+    save: "सेटिंग्स सेव करें",
+    saving: "सेव हो रहा है...",
+    saved: "सेव हो गया।",
+    logsTitle: "लॉग",
+    liveFrom: "लाइव से",
+    language: "भाषा",
+    favoritesTitle: "सेव किए गए प्रॉम्प्ट्स",
+    savePrompt: "प्रॉम्प्ट सेव करें",
+    promptName: "प्रॉम्प्ट का नाम",
+    improvePrompt: "प्रॉम्प्ट सुधारें",
+    improved: "सुधारा हुआ प्रॉम्प्ट",
+    navHelp: "सहायता",
+    helpTitle: "Aurora का उपयोग कैसे करें",
+    helpShortcuts: "टिप्स",
+    helpSend: "मल्टी-टर्न के लिए चैट या सिंगल-शॉट के लिए कंप्लीशन का उपयोग करें। मॉडल चुनें और भेजें।",
+    helpPull: "मॉडल टैब से मॉडल डाउनलोड या खोजें; GGUF फाइल नाम का उपयोग करें।",
+    helpSettings: "अपना स्टोरेज फोल्डर और डिफ़ॉल्ट मॉडल चुनें; Rust बैकएंड वहां से GGUFs लोड करता है।",
+    helpLogs: "लॉग Rust बैकएंड और मॉडल इंफरेंस गतिविधि दिखाते हैं।",
+    helpCli: "मॉडल प्रबंधित करने के लिए एम्बेडेड CLI पैनल (help/list/pull/run/chat) का उपयोग करें।",
+    plansTitle: "भारी मॉडल के लिए सब्सक्रिप्शन",
+    planBasic: "स्टार्टर: केवल लोकल (कोई GPU बिलिंग नहीं)।",
+    planPro: "Pro GPU: GLM-4.7+/MiniMax M2 और भारी मॉडल के लिए।",
+    planEnterprise: "Enterprise: समर्पित GPU और कस्टम लिमिट।",
+    planCta: "प्रबंधित करें या सब्सक्राइब करें",
+    navTerminal: "CLI",
+    terminalTitle: "एम्बेडेड CLI",
+    terminalHelp: "कमांड्स: help, list, pull <name> <repo> <filename> [subfolder], run <name>।",
+    terminalPlaceholder: "कमांड टाइप करें, जैसे pull glm org/repo model.gguf",
+    noSaved: "कोई सेव किया हुआ प्रॉम्प्ट नहीं",
+    connecting: "कनेक्ट हो रहा है...",
+    online: "ऑनलाइन",
+    offline: "ऑफलाइन",
+    none: "कोई नहीं",
+    tokens: "टोकन",
+  },
 };
 
 type I18nContextShape = {
@@ -611,6 +692,7 @@ function detectLocale(): Locale {
       if (norm.startsWith("tr")) return "tr";
       if (norm.startsWith("fa") || norm.startsWith("pr") || norm.startsWith("ir")) return "fa";
       if (norm.startsWith("zh") || norm.startsWith("cn")) return "zh";
+      if (norm.startsWith("hi") || norm.startsWith("in")) return "hi";
     }
   }
   return "en";

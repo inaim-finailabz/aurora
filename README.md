@@ -36,7 +36,13 @@ Releases are automated via GitHub Actions: see `.github/workflows/release.yml` a
 Please read `CONTRIBUTING.md` for contribution guidelines.
 ## License
 
-This project is licensed under the **PolyForm Noncommercial License 1.0.0**. You may use, copy, and modify the code for non-commercial purposes only. Commercial use is prohibited without obtaining a separate commercial license from FinAI Labz. See the `LICENSE` file for details. For commercial licensing requests, see `LICENSE-FAQ.md` for contact information and example pricing tiers.
+**Dual License Model:**
+
+- **Pre-built Binaries** (GitHub Releases): Licensed under the **MIT License** (`LICENSE-BINARIES`). You are free to use, distribute, and modify the binaries for any purpose, including commercial use.
+
+- **Source Code**: Licensed under the **PolyForm Noncommercial License 1.0.0** (`LICENSE`). You may use, copy, and modify the source code for non-commercial purposes only. Commercial use of the source code is prohibited without obtaining a separate commercial license from FinAI Labz.
+
+For commercial licensing inquiries, see `LICENSE-FAQ.md` or contact licensing@finailabz.com.
 
 ## Theme
 

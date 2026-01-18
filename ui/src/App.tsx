@@ -14,6 +14,13 @@ import {
   detectGgufFromRepo,
   listAiWikiModels,
   logToBackend,
+  getTemplates,
+  listCustomModels,
+  createCustomModel,
+  deleteCustomModel,
+  CustomModelConfig,
+  CustomModelParameters,
+  ModelTemplate,
 } from "./api";
 import "./style.css";
 import { useI18n } from "./i18n";
@@ -616,6 +623,319 @@ function ModelsPanel() {
           </div>
         </div>
       </div>
+
+      {/* Custom Model Creator */}
+      <CustomModelCreator baseModels={models.data?.models || []} onModelCreated={() => queryClient.invalidateQueries({ queryKey: ["custom-models"] })} />
+    </div>
+  );
+}
+
+// Custom Model Creator Component
+function CustomModelCreator({ baseModels, onModelCreated }: { baseModels: Array<{ name: string; path: string }>; onModelCreated: () => void }) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const [showCreator, setShowCreator] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<ModelTemplate | null>(null);
+  const [customName, setCustomName] = useState("");
+  const [baseModel, setBaseModel] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [promptTemplate, setPromptTemplate] = useState("");
+  const [description, setDescription] = useState("");
+  const [temperature, setTemperature] = useState(0.7);
+  const [topP, setTopP] = useState(0.95);
+  const [topK, setTopK] = useState<number | undefined>(40);
+  const [maxTokens, setMaxTokens] = useState(512);
+  const [repeatPenalty, setRepeatPenalty] = useState<number | undefined>(1.1);
+  const [contextLength, setContextLength] = useState<number | undefined>(2048);
+  const [stopSequences, setStopSequences] = useState("");
+
+  const templates = useQuery({ queryKey: ["templates"], queryFn: getTemplates });
+  const customModels = useQuery({ queryKey: ["custom-models"], queryFn: listCustomModels });
+
+  const createModel = useMutation({
+    mutationFn: createCustomModel,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["custom-models"] });
+      onModelCreated();
+      resetForm();
+      setShowCreator(false);
+    },
+  });
+
+  const deleteModel = useMutation({
+    mutationFn: deleteCustomModel,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["custom-models"] });
+    },
+  });
+
+  const resetForm = () => {
+    setCustomName("");
+    setBaseModel("");
+    setSystemPrompt("");
+    setPromptTemplate("");
+    setDescription("");
+    setTemperature(0.7);
+    setTopP(0.95);
+    setTopK(40);
+    setMaxTokens(512);
+    setRepeatPenalty(1.1);
+    setContextLength(2048);
+    setStopSequences("");
+    setSelectedTemplate(null);
+  };
+
+  const applyTemplate = (template: ModelTemplate) => {
+    setSelectedTemplate(template);
+    setSystemPrompt(template.system_prompt);
+    setPromptTemplate(template.template);
+    setTemperature(template.parameters.temperature);
+    setTopP(template.parameters.top_p);
+    setTopK(template.parameters.top_k);
+    setMaxTokens(template.parameters.max_tokens);
+    setRepeatPenalty(template.parameters.repeat_penalty);
+    setContextLength(template.parameters.context_length);
+    setStopSequences(template.parameters.stop_sequences.join(", "));
+  };
+
+  const handleCreate = () => {
+    if (!customName.trim() || !baseModel.trim()) return;
+
+    const config: CustomModelConfig = {
+      name: customName.trim(),
+      base_model: baseModel,
+      system_prompt: systemPrompt || undefined,
+      template: promptTemplate || undefined,
+      description: description || undefined,
+      parameters: {
+        temperature,
+        top_p: topP,
+        top_k: topK,
+        max_tokens: maxTokens,
+        repeat_penalty: repeatPenalty,
+        context_length: contextLength,
+        stop_sequences: stopSequences.split(",").map(s => s.trim()).filter(Boolean),
+      },
+    };
+
+    createModel.mutate(config);
+  };
+
+  return (
+    <div className="custom-model-section" style={{ marginTop: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h3>Custom Models</h3>
+        <button className="primary" onClick={() => setShowCreator(!showCreator)}>
+          {showCreator ? "Close" : "+ Create Custom Model"}
+        </button>
+      </div>
+
+      {/* List existing custom models */}
+      <div className="list" style={{ marginTop: 12 }}>
+        {(customModels.data?.models || []).map((m) => (
+          <div key={m.name} className="list-item">
+            <div>
+              <div style={{ fontWeight: 700 }}>{m.name}</div>
+              <div className="status">Base: {m.base_model}</div>
+              {m.description && <div className="status">{m.description}</div>}
+            </div>
+            <div className="input-row" style={{ width: 120 }}>
+              <span className="badge">custom</span>
+              <button
+                className="pick-btn"
+                onClick={() => deleteModel.mutate(m.name)}
+                disabled={deleteModel.isPending}
+              >
+                {deleteModel.isPending ? "..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        ))}
+        {!customModels.data?.models?.length && (
+          <div className="status">No custom models created yet. Create one to customize inference behavior.</div>
+        )}
+      </div>
+
+      {/* Creator form */}
+      {showCreator && (
+        <div className="custom-model-creator" style={{ marginTop: 16, padding: 16, background: "var(--panel-bg)", borderRadius: 8, border: "1px solid var(--border)" }}>
+          <h4 style={{ marginTop: 0 }}>Create Custom Model</h4>
+
+          {/* Template selector */}
+          <div style={{ marginBottom: 16 }}>
+            <label>Start from Template</label>
+            <div className="template-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8, marginTop: 8 }}>
+              {(templates.data || []).map((tpl) => (
+                <button
+                  key={tpl.id}
+                  className={`template-card ${selectedTemplate?.id === tpl.id ? "selected" : ""}`}
+                  onClick={() => applyTemplate(tpl)}
+                  style={{
+                    padding: "12px",
+                    textAlign: "left",
+                    background: selectedTemplate?.id === tpl.id ? "var(--accent)" : "var(--bg)",
+                    color: selectedTemplate?.id === tpl.id ? "white" : "inherit",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{tpl.name}</div>
+                  <div style={{ fontSize: 11, opacity: 0.8, marginTop: 4 }}>{tpl.description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Basic info */}
+          <div className="two-col" style={{ gap: 16 }}>
+            <div>
+              <label>Custom Model Name *</label>
+              <input
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                placeholder="my-assistant"
+              />
+            </div>
+            <div>
+              <label>Base Model *</label>
+              <select value={baseModel} onChange={(e) => setBaseModel(e.target.value)}>
+                <option value="">Select a base model...</option>
+                {baseModels.map((m) => (
+                  <option key={m.name} value={m.name}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <label>Description</label>
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="A brief description of this custom model"
+            />
+          </div>
+
+          {/* System prompt and template */}
+          <div style={{ marginTop: 12 }}>
+            <label>System Prompt</label>
+            <textarea
+              rows={3}
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder="You are a helpful AI assistant..."
+            />
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <label>Prompt Template</label>
+            <textarea
+              rows={3}
+              value={promptTemplate}
+              onChange={(e) => setPromptTemplate(e.target.value)}
+              placeholder="Use {{prompt}} as placeholder for user input"
+            />
+            <p className="status" style={{ marginTop: 4 }}>Use {"{{prompt}}"} where user input should be inserted</p>
+          </div>
+
+          {/* Parameters */}
+          <div style={{ marginTop: 16 }}>
+            <h5 style={{ marginBottom: 12 }}>Parameters</h5>
+            <div className="params-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              <div>
+                <label>Temperature ({temperature.toFixed(2)})</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.05"
+                  value={temperature}
+                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div>
+                <label>Top P ({topP.toFixed(2)})</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={topP}
+                  onChange={(e) => setTopP(parseFloat(e.target.value))}
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div>
+                <label>Top K</label>
+                <input
+                  type="number"
+                  value={topK ?? ""}
+                  onChange={(e) => setTopK(e.target.value ? parseInt(e.target.value) : undefined)}
+                  placeholder="40"
+                />
+              </div>
+              <div>
+                <label>Max Tokens</label>
+                <input
+                  type="number"
+                  value={maxTokens}
+                  onChange={(e) => setMaxTokens(parseInt(e.target.value) || 512)}
+                />
+              </div>
+              <div>
+                <label>Repeat Penalty</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={repeatPenalty ?? ""}
+                  onChange={(e) => setRepeatPenalty(e.target.value ? parseFloat(e.target.value) : undefined)}
+                  placeholder="1.1"
+                />
+              </div>
+              <div>
+                <label>Context Length</label>
+                <input
+                  type="number"
+                  value={contextLength ?? ""}
+                  onChange={(e) => setContextLength(e.target.value ? parseInt(e.target.value) : undefined)}
+                  placeholder="2048"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <label>Stop Sequences (comma-separated)</label>
+            <input
+              value={stopSequences}
+              onChange={(e) => setStopSequences(e.target.value)}
+              placeholder="### User:, Human:"
+            />
+          </div>
+
+          {/* Actions */}
+          <div style={{ marginTop: 16, display: "flex", gap: 12 }}>
+            <button
+              className="primary"
+              onClick={handleCreate}
+              disabled={!customName.trim() || !baseModel.trim() || createModel.isPending}
+            >
+              {createModel.isPending ? "Creating..." : "Create Custom Model"}
+            </button>
+            <button className="pick-btn" onClick={resetForm}>
+              Reset
+            </button>
+          </div>
+
+          {createModel.isError && (
+            <p className="status" style={{ color: "var(--error)", marginTop: 8 }}>
+              {(createModel.error as Error).message}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1038,6 +1358,7 @@ function Layout() {
                 <option value="tr">🇹🇷 Türkçe</option>
                 <option value="fa">🇮🇷 فارسی</option>
                 <option value="zh">🇨🇳 中文</option>
+                <option value="hi">🇮🇳 हिन्दी</option>
               </select>
             </>
           ) : (
@@ -1055,6 +1376,7 @@ function Layout() {
               <option value="tr">🇹🇷</option>
               <option value="fa">🇮🇷</option>
               <option value="zh">🇨🇳</option>
+              <option value="hi">🇮🇳</option>
             </select>
           )}
         </div>

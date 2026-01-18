@@ -291,6 +291,10 @@ impl AppState {
     fn registry_path(&self) -> PathBuf {
         self.config.read().storage_dir.join("models.json")
     }
+
+    fn custom_models_path(&self) -> PathBuf {
+        self.config.read().storage_dir.join("custom-models.json")
+    }
 }
 
 // ============================================================================
@@ -424,6 +428,207 @@ struct LogsQuery {
 
 fn default_log_limit() -> usize {
     200
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PopularModel {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recommended_quant: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gguf: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PopularModelsConfig {
+    models: Vec<PopularModel>,
+}
+
+// ============================================================================
+// Custom Model (Modelfile-like) structures
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CustomModelConfig {
+    /// Name for this custom model
+    name: String,
+    /// Base model to use (path or name of an existing model)
+    base_model: String,
+    /// System prompt template
+    #[serde(default)]
+    system_prompt: Option<String>,
+    /// User prompt template (use {{prompt}} as placeholder)
+    #[serde(default)]
+    template: Option<String>,
+    /// Model parameters
+    #[serde(default)]
+    parameters: CustomModelParameters,
+    /// Description of the custom model
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct CustomModelParameters {
+    #[serde(default = "default_temperature")]
+    temperature: f32,
+    #[serde(default = "default_top_p")]
+    top_p: f32,
+    #[serde(default)]
+    top_k: Option<u32>,
+    #[serde(default)]
+    repeat_penalty: Option<f32>,
+    #[serde(default)]
+    context_length: Option<u32>,
+    #[serde(default = "default_max_tokens")]
+    max_tokens: u32,
+    #[serde(default)]
+    stop_sequences: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CustomModelRegistry {
+    models: Vec<CustomModelConfig>,
+}
+
+impl Default for CustomModelRegistry {
+    fn default() -> Self {
+        Self { models: Vec::new() }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ModelTemplate {
+    id: String,
+    name: String,
+    description: String,
+    system_prompt: String,
+    template: String,
+    parameters: CustomModelParameters,
+}
+
+fn get_default_templates() -> Vec<ModelTemplate> {
+    vec![
+        ModelTemplate {
+            id: "assistant".to_string(),
+            name: "General Assistant".to_string(),
+            description: "A helpful, harmless AI assistant for general tasks".to_string(),
+            system_prompt: "You are a helpful AI assistant. Answer questions accurately and concisely.".to_string(),
+            template: "### User:\n{{prompt}}\n\n### Assistant:\n".to_string(),
+            parameters: CustomModelParameters {
+                temperature: 0.7,
+                top_p: 0.95,
+                top_k: Some(40),
+                repeat_penalty: Some(1.1),
+                context_length: Some(2048),
+                max_tokens: 512,
+                stop_sequences: vec!["### User:".to_string()],
+            },
+        },
+        ModelTemplate {
+            id: "coder".to_string(),
+            name: "Code Assistant".to_string(),
+            description: "Specialized for programming and code generation".to_string(),
+            system_prompt: "You are an expert programmer. Write clean, efficient, well-commented code. Explain your solutions when asked.".to_string(),
+            template: "### Task:\n{{prompt}}\n\n### Solution:\n```".to_string(),
+            parameters: CustomModelParameters {
+                temperature: 0.2,
+                top_p: 0.9,
+                top_k: Some(50),
+                repeat_penalty: Some(1.05),
+                context_length: Some(4096),
+                max_tokens: 1024,
+                stop_sequences: vec!["### Task:".to_string(), "```\n\n".to_string()],
+            },
+        },
+        ModelTemplate {
+            id: "writer".to_string(),
+            name: "Creative Writer".to_string(),
+            description: "For creative writing, stories, and content generation".to_string(),
+            system_prompt: "You are a creative writer with a vivid imagination. Write engaging, well-structured prose.".to_string(),
+            template: "Write the following:\n\n{{prompt}}\n\n---\n\n".to_string(),
+            parameters: CustomModelParameters {
+                temperature: 0.9,
+                top_p: 0.95,
+                top_k: Some(80),
+                repeat_penalty: Some(1.15),
+                context_length: Some(2048),
+                max_tokens: 1024,
+                stop_sequences: vec!["---".to_string()],
+            },
+        },
+        ModelTemplate {
+            id: "analyst".to_string(),
+            name: "Data Analyst".to_string(),
+            description: "For data analysis, insights, and structured outputs".to_string(),
+            system_prompt: "You are a data analyst. Provide clear, accurate analysis with supporting reasoning.".to_string(),
+            template: "Analysis Request:\n{{prompt}}\n\nAnalysis:\n".to_string(),
+            parameters: CustomModelParameters {
+                temperature: 0.3,
+                top_p: 0.85,
+                top_k: Some(30),
+                repeat_penalty: Some(1.0),
+                context_length: Some(2048),
+                max_tokens: 768,
+                stop_sequences: vec!["Analysis Request:".to_string()],
+            },
+        },
+        ModelTemplate {
+            id: "translator".to_string(),
+            name: "Translator".to_string(),
+            description: "For language translation tasks".to_string(),
+            system_prompt: "You are a professional translator. Provide accurate translations preserving the original meaning and tone.".to_string(),
+            template: "Translate the following:\n\n{{prompt}}\n\nTranslation:\n".to_string(),
+            parameters: CustomModelParameters {
+                temperature: 0.1,
+                top_p: 0.8,
+                top_k: Some(20),
+                repeat_penalty: Some(1.0),
+                context_length: Some(2048),
+                max_tokens: 512,
+                stop_sequences: vec!["Translate the following:".to_string()],
+            },
+        },
+        ModelTemplate {
+            id: "chat".to_string(),
+            name: "Conversational Chat".to_string(),
+            description: "Natural conversation with friendly personality".to_string(),
+            system_prompt: "You are a friendly conversational AI. Be warm, engaging, and helpful while maintaining natural dialogue.".to_string(),
+            template: "Human: {{prompt}}\n\nAssistant: ".to_string(),
+            parameters: CustomModelParameters {
+                temperature: 0.8,
+                top_p: 0.95,
+                top_k: Some(50),
+                repeat_penalty: Some(1.1),
+                context_length: Some(2048),
+                max_tokens: 256,
+                stop_sequences: vec!["Human:".to_string()],
+            },
+        },
+    ]
+}
+
+fn load_custom_models(path: &Path) -> CustomModelRegistry {
+    if !path.exists() {
+        return CustomModelRegistry::default();
+    }
+    match std::fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => CustomModelRegistry::default(),
+    }
+}
+
+fn save_custom_models(path: &Path, registry: &CustomModelRegistry) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string_pretty(registry)?;
+    std::fs::write(path, content)?;
+    Ok(())
 }
 
 // ============================================================================
@@ -636,6 +841,201 @@ async fn logs_stream_handler(
         }
     };
     axum::response::Sse::new(stream)
+}
+
+async fn popular_models_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<PopularModel>>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/popular-models", "GET", "fetching popular models catalog");
+
+    // Try multiple locations for the popular-models.yaml file
+    let possible_paths = vec![
+        // Development: relative to current directory (ui/src-tauri -> ui -> root)
+        PathBuf::from("popular-models.yaml"),
+        PathBuf::from("../popular-models.yaml"),
+        PathBuf::from("../../popular-models.yaml"),
+        PathBuf::from("../../../popular-models.yaml"),
+        // Production: relative to executable
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("popular-models.yaml")))
+            .unwrap_or_else(|| PathBuf::from("popular-models.yaml")),
+        // Tauri resource directory (bundled)
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("../Resources/popular-models.yaml")))
+            .unwrap_or_else(|| PathBuf::from("popular-models.yaml")),
+        // User config directory
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("aurora")
+            .join("popular-models.yaml"),
+    ];
+
+    for path in &possible_paths {
+        if path.exists() {
+            match std::fs::read_to_string(path) {
+                Ok(content) => {
+                    match serde_yaml_ng::from_str::<PopularModelsConfig>(&content) {
+                        Ok(config) => {
+                            state.log_response(
+                                "/api/popular-models",
+                                "200",
+                                &format!("loaded {} models from {:?}", config.models.len(), path),
+                            );
+                            return Ok(Json(config.models));
+                        }
+                        Err(e) => {
+                            state.log_error(format!("Failed to parse popular-models.yaml: {}", e));
+                            return Err((
+                                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("Failed to parse popular-models.yaml: {}", e),
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    state.log_error(format!("Failed to read {:?}: {}", path, e));
+                    continue;
+                }
+            }
+        }
+    }
+
+    // Return empty list if file not found (graceful fallback)
+    state.log_response("/api/popular-models", "200", "no popular-models.yaml found, returning empty list");
+    Ok(Json(Vec::new()))
+}
+
+// ============================================================================
+// Custom Model Handlers
+// ============================================================================
+
+/// Get available templates for creating custom models
+async fn get_templates_handler(
+    State(state): State<AppState>,
+) -> Json<Vec<ModelTemplate>> {
+    state.log_request("/api/templates", "GET", "fetching model templates");
+    let templates = get_default_templates();
+    state.log_response("/api/templates", "200", &format!("returning {} templates", templates.len()));
+    Json(templates)
+}
+
+/// List all custom models
+async fn list_custom_models_handler(
+    State(state): State<AppState>,
+) -> Json<CustomModelRegistry> {
+    state.log_request("/api/custom-models", "GET", "listing custom models");
+    let registry = load_custom_models(&state.custom_models_path());
+    state.log_response("/api/custom-models", "200", &format!("found {} custom models", registry.models.len()));
+    Json(registry)
+}
+
+/// Create a new custom model
+async fn create_custom_model_handler(
+    State(state): State<AppState>,
+    Json(body): Json<CustomModelConfig>,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/custom-models", "POST", &format!("creating custom model: {}", body.name));
+
+    // Validate the custom model
+    if body.name.trim().is_empty() {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            "Model name cannot be empty".to_string(),
+        ));
+    }
+
+    if body.base_model.trim().is_empty() {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            "Base model must be specified".to_string(),
+        ));
+    }
+
+    // Load existing custom models
+    let mut registry = load_custom_models(&state.custom_models_path());
+
+    // Check if a model with this name already exists
+    if registry.models.iter().any(|m| m.name == body.name) {
+        // Update existing model
+        registry.models.retain(|m| m.name != body.name);
+        state.log("Updating existing custom model".to_string());
+    }
+
+    // Add the new model
+    registry.models.push(body.clone());
+
+    // Save the registry
+    if let Err(e) = save_custom_models(&state.custom_models_path(), &registry) {
+        state.log_error(format!("Failed to save custom model: {}", e));
+        return Err((
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to save custom model: {}", e),
+        ));
+    }
+
+    state.log_response("/api/custom-models", "201", &format!("created custom model: {}", body.name));
+    Ok(Json(serde_json::json!({
+        "status": "created",
+        "name": body.name,
+        "base_model": body.base_model
+    })))
+}
+
+/// Get a specific custom model
+async fn get_custom_model_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<Json<CustomModelConfig>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/custom-models", "GET", &format!("fetching custom model: {}", name));
+
+    let registry = load_custom_models(&state.custom_models_path());
+
+    if let Some(model) = registry.models.into_iter().find(|m| m.name == name) {
+        state.log_response("/api/custom-models", "200", &format!("found custom model: {}", name));
+        Ok(Json(model))
+    } else {
+        state.log_error(format!("Custom model not found: {}", name));
+        Err((
+            axum::http::StatusCode::NOT_FOUND,
+            format!("Custom model '{}' not found", name),
+        ))
+    }
+}
+
+/// Delete a custom model
+async fn delete_custom_model_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/custom-models", "DELETE", &format!("deleting custom model: {}", name));
+
+    let mut registry = load_custom_models(&state.custom_models_path());
+    let original_len = registry.models.len();
+    registry.models.retain(|m| m.name != name);
+
+    if registry.models.len() == original_len {
+        state.log_error(format!("Custom model not found: {}", name));
+        return Err((
+            axum::http::StatusCode::NOT_FOUND,
+            format!("Custom model '{}' not found", name),
+        ));
+    }
+
+    if let Err(e) = save_custom_models(&state.custom_models_path(), &registry) {
+        state.log_error(format!("Failed to delete custom model: {}", e));
+        return Err((
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to delete custom model: {}", e),
+        ));
+    }
+
+    state.log_response("/api/custom-models", "200", &format!("deleted custom model: {}", name));
+    Ok(Json(serde_json::json!({
+        "status": "deleted",
+        "name": name
+    })))
 }
 
 async fn models_handler(State(state): State<AppState>) -> Json<ModelsResponse> {
@@ -980,7 +1380,7 @@ async fn index_handler() -> axum::response::Html<&'static str> {
     <h1>Aurora API</h1>
     <p>From the brain of FinAI Labz - copyright 2026.</p>
     <p>This server powers the Aurora desktop app.</p>
-    <p>Endpoints: /health, /api/models, /api/chat, /api/generate, /api/pull, /api/settings, /api/log, /api/logs</p>
+    <p>Endpoints: /health, /api/models, /api/popular-models, /api/chat, /api/generate, /api/pull, /api/settings, /api/log, /api/logs</p>
   </body>
 </html>"#,
     )
@@ -1136,6 +1536,12 @@ fn router(state: AppState) -> Router {
         .route("/api/settings", post(post_settings_handler))
         .route("/api/models", get(models_handler))
         .route("/api/models/:name", axum::routing::delete(delete_model_handler))
+        .route("/api/popular-models", get(popular_models_handler))
+        .route("/api/templates", get(get_templates_handler))
+        .route("/api/custom-models", get(list_custom_models_handler))
+        .route("/api/custom-models", post(create_custom_model_handler))
+        .route("/api/custom-models/:name", get(get_custom_model_handler))
+        .route("/api/custom-models/:name", axum::routing::delete(delete_custom_model_handler))
         .route("/api/chat", post(chat_handler))
         .route("/api/generate", post(generate_handler))
         .route("/api/pull", post(pull_handler))
