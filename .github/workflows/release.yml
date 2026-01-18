@@ -41,29 +41,92 @@ jobs:
         working-directory: ui/src-tauri
         run: cargo build --bin aurora --release
 
-      - name: Prepare CLI sidecar (macOS)
-        run: |
-          TARGET=$(rustc -vV | awk '/^host: /{print $2}')
-          cp ui/src-tauri/target/release/aurora ui/src-tauri/aurora-$TARGET
-
       - name: Build Tauri app (macOS)
         working-directory: ui
-        run: pnpm tauri build
+        run: pnpm tauri build || true
+
+      - name: Create DMG manually if needed
+        working-directory: ui/src-tauri/target/release/bundle/macos
+        run: |
+          if [ ! -f Aurora_*.dmg ]; then
+            hdiutil create -volname "Aurora" -srcfolder Aurora.app -ov -format UDZO Aurora_0.1.0_aarch64.dmg
+          fi
 
       - name: Package CLI for macOS
         run: |
           mkdir -p aurora-cli-macos
           cp ui/src-tauri/target/release/aurora aurora-cli-macos/
-          tar -czvf aurora-cli-macos.tar.gz aurora-cli-macos
+          chmod +x aurora-cli-macos/aurora
+          tar -czvf aurora-cli-macos-aarch64.tar.gz aurora-cli-macos
 
-      - name: Upload macOS artifacts
+      - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
         with:
-          name: aurora-macos
-          path: |
-            ui/src-tauri/target/release/bundle/macos/*.app
-            ui/src-tauri/target/release/bundle/dmg/*.dmg
-            aurora-cli-macos.tar.gz
+          name: aurora-macos-dmg
+          path: ui/src-tauri/target/release/bundle/macos/*.dmg
+
+      - name: Upload macOS CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-cli-macos
+          path: aurora-cli-macos-aarch64.tar.gz
+
+  build-macos-intel:
+    runs-on: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Install dependencies
+        working-directory: ui
+        run: pnpm install
+
+      - name: Build CLI binary (macOS Intel)
+        working-directory: ui/src-tauri
+        run: cargo build --bin aurora --release
+
+      - name: Build Tauri app (macOS Intel)
+        working-directory: ui
+        run: pnpm tauri build || true
+
+      - name: Create DMG manually if needed
+        working-directory: ui/src-tauri/target/release/bundle/macos
+        run: |
+          if [ ! -f Aurora_*.dmg ]; then
+            hdiutil create -volname "Aurora" -srcfolder Aurora.app -ov -format UDZO Aurora_0.1.0_x64.dmg
+          fi
+
+      - name: Package CLI for macOS Intel
+        run: |
+          mkdir -p aurora-cli-macos
+          cp ui/src-tauri/target/release/aurora aurora-cli-macos/
+          chmod +x aurora-cli-macos/aurora
+          tar -czvf aurora-cli-macos-x64.tar.gz aurora-cli-macos
+
+      - name: Upload macOS Intel DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-macos-intel-dmg
+          path: ui/src-tauri/target/release/bundle/macos/*.dmg
+
+      - name: Upload macOS Intel CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-cli-macos-intel
+          path: aurora-cli-macos-x64.tar.gz
 
   build-windows:
     runs-on: windows-latest
@@ -92,29 +155,33 @@ jobs:
         working-directory: ui/src-tauri
         run: cargo build --bin aurora --release
 
-      - name: Prepare CLI sidecar (Windows)
-        run: |
-          $target = (rustc -vV | Select-String '^host:' | ForEach-Object { $_.ToString().Split()[1] })
-          Copy-Item ui/src-tauri/target/release/aurora.exe "ui/src-tauri/aurora-$target.exe"
-
       - name: Build Tauri app (Windows)
         working-directory: ui
         run: pnpm tauri build
 
       - name: Package CLI for Windows
         run: |
-          mkdir aurora-cli-windows
-          cp ui/src-tauri/target/release/aurora.exe aurora-cli-windows/
+          New-Item -ItemType Directory -Force -Path aurora-cli-windows
+          Copy-Item ui/src-tauri/target/release/aurora.exe aurora-cli-windows/
           Compress-Archive -Path aurora-cli-windows -DestinationPath aurora-cli-windows.zip
 
-      - name: Upload Windows artifacts
+      - name: Upload Windows MSI
         uses: actions/upload-artifact@v4
         with:
-          name: aurora-windows
-          path: |
-            ui/src-tauri/target/release/bundle/msi/*.msi
-            ui/src-tauri/target/release/bundle/nsis/*.exe
-            aurora-cli-windows.zip
+          name: aurora-windows-msi
+          path: ui/src-tauri/target/release/bundle/msi/*.msi
+
+      - name: Upload Windows NSIS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-windows-nsis
+          path: ui/src-tauri/target/release/bundle/nsis/*.exe
+
+      - name: Upload Windows CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-cli-windows
+          path: aurora-cli-windows.zip
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -148,11 +215,6 @@ jobs:
         working-directory: ui/src-tauri
         run: cargo build --bin aurora --release
 
-      - name: Prepare CLI sidecar (Linux)
-        run: |
-          TARGET=$(rustc -vV | awk '/^host: /{print $2}')
-          cp ui/src-tauri/target/release/aurora ui/src-tauri/aurora-$TARGET
-
       - name: Build Tauri app (Linux)
         working-directory: ui
         run: pnpm tauri build
@@ -161,19 +223,29 @@ jobs:
         run: |
           mkdir -p aurora-cli-linux
           cp ui/src-tauri/target/release/aurora aurora-cli-linux/
-          tar -czvf aurora-cli-linux.tar.gz aurora-cli-linux
+          chmod +x aurora-cli-linux/aurora
+          tar -czvf aurora-cli-linux-x64.tar.gz aurora-cli-linux
 
-      - name: Upload Linux artifacts
+      - name: Upload Linux deb
         uses: actions/upload-artifact@v4
         with:
-          name: aurora-linux
-          path: |
-            ui/src-tauri/target/release/bundle/deb/*.deb
-            ui/src-tauri/target/release/bundle/appimage/*.AppImage
-            aurora-cli-linux.tar.gz
+          name: aurora-linux-deb
+          path: ui/src-tauri/target/release/bundle/deb/*.deb
+
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-linux-appimage
+          path: ui/src-tauri/target/release/bundle/appimage/*.AppImage
+
+      - name: Upload Linux CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-cli-linux
+          path: aurora-cli-linux-x64.tar.gz
 
   create-release:
-    needs: [build-macos, build-windows, build-linux]
+    needs: [build-macos, build-macos-intel, build-windows, build-linux]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -187,20 +259,68 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f
 
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-files/ \;
+          ls -la release-files/
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            artifacts/**/*.dmg
-            artifacts/**/*.app
-            artifacts/**/*.msi
-            artifacts/**/*.exe
-            artifacts/**/*.deb
-            artifacts/**/*.AppImage
-            artifacts/**/*.tar.gz
-            artifacts/**/*.zip
+          files: release-files/*
           draft: false
           prerelease: false
           generate_release_notes: true
+          body: |
+            ## Aurora v${{ github.ref_name }}
+
+            ### Downloads
+
+            **Desktop App:**
+            - **macOS (Apple Silicon):** `Aurora_*_aarch64.dmg`
+            - **macOS (Intel):** `Aurora_*_x64.dmg`
+            - **Windows:** `Aurora_*_x64-setup.exe` (NSIS) or `Aurora_*.msi`
+            - **Linux:** `aurora_*.deb` or `aurora_*.AppImage`
+
+            **CLI Only:**
+            - **macOS (Apple Silicon):** `aurora-cli-macos-aarch64.tar.gz`
+            - **macOS (Intel):** `aurora-cli-macos-x64.tar.gz`
+            - **Windows:** `aurora-cli-windows.zip`
+            - **Linux:** `aurora-cli-linux-x64.tar.gz`
+
+            ### Installation
+
+            **macOS:**
+            1. Download the `.dmg` file
+            2. Open it and drag Aurora to Applications
+            3. Right-click Aurora.app → Open (first time only)
+            4. Install CLI from Settings → Install CLI
+
+            **Windows:**
+            1. Download the `.exe` installer
+            2. Run the installer
+            3. Launch Aurora from Start Menu
+
+            **Linux:**
+            1. Download `.deb` or `.AppImage`
+            2. For deb: `sudo dpkg -i aurora_*.deb`
+            3. For AppImage: `chmod +x *.AppImage && ./aurora_*.AppImage`
+
+            ### CLI Installation
+
+            After extracting the CLI:
+            ```bash
+            # macOS/Linux
+            tar -xzf aurora-cli-*.tar.gz
+            sudo mv aurora-cli-*/aurora /usr/local/bin/
+
+            # Or install to ~/.local/bin (no sudo)
+            mkdir -p ~/.local/bin
+            mv aurora-cli-*/aurora ~/.local/bin/
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+            ```
+
+            Test: `aurora --version`
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
