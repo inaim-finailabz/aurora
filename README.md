@@ -32,6 +32,50 @@ pnpm --prefix ui run tauri -- build
 
 Releases are automated via GitHub Actions: see `.github/workflows/release.yml` and `RELEASES.md`.
 
+## CLI (aurora)
+
+The `aurora` CLI is packaged as a standalone binary for macOS, Windows, and Linux. To use it from any terminal, add the binary to your PATH.
+
+macOS / Linux:
+```bash
+# after extracting the release archive
+./scripts/install-cli.sh /path/to/aurora
+```
+
+Windows (PowerShell, admin):
+```powershell
+.\scripts\install-cli.ps1 -Source "C:\path\to\aurora.exe"
+```
+
+Verify:
+```bash
+aurora status
+aurora pull TheBloke/Llama-2-7B-GGUF:Q4_K_M
+```
+
+### Platform-specific builds
+
+Local builds are expected to run on the target OS (cross-compilation is not configured).
+
+macOS:
+- Prereqs: Xcode Command Line Tools (`xcode-select --install`)
+- App bundle: `pnpm --prefix ui run build`
+- CLI binary: `cd ui/src-tauri && cargo build --bin aurora --release`
+- Output: `ui/src-tauri/target/release/bundle/macos/Aurora.app`
+
+Windows:
+- Prereqs: Visual Studio Build Tools + Windows SDK (MSVC), Node.js 20+, pnpm, Rust
+- App installers: `pnpm --prefix ui run build`
+- CLI binary: `cd ui/src-tauri && cargo build --bin aurora --release`
+- Output: `ui/src-tauri/target/release/bundle/msi/*.msi` and `ui/src-tauri/target/release/bundle/nsis/*.exe`
+
+Linux (Ubuntu/Debian):
+- Prereqs: `sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf`
+- App bundles: `pnpm --prefix ui run build`
+- Output: `ui/src-tauri/target/release/bundle/deb/*.deb` and `ui/src-tauri/target/release/bundle/appimage/*.AppImage`
+
+Note: If you only want the `.app` bundle on macOS, keep `ui/src-tauri/tauri.conf.json` at `bundle.targets = ["app"]`. For installers (DMG/MSI/NSIS/DEB/AppImage), include the relevant targets.
+
 ## Contributing
 Please read `CONTRIBUTING.md` for contribution guidelines.
 ## License

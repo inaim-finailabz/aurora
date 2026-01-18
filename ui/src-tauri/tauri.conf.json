@@ -13,7 +13,7 @@
     "bundle": {
       "active": true,
       "identifier": "com.finailabz.aurora",
-      "targets": "all",
+      "targets": ["app", "msi", "nsis", "deb", "appimage"],
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
@@ -23,6 +23,9 @@
       ],
       "resources": [
         "../../popular-models.yaml"
+      ],
+      "externalBin": [
+        "aurora"
       ],
       "shortDescription": "Local LLM Inference Desktop App",
       "longDescription": "Aurora is a powerful desktop application for running local LLM inference with GGUF models. Built with Rust, React, and Tauri by FinAI Labz.",

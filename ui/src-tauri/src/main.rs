@@ -847,6 +847,8 @@ async fn popular_models_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<PopularModel>>, (axum::http::StatusCode, String)> {
     state.log_request("/api/popular-models", "GET", "fetching popular models catalog");
+    const EMBEDDED_POPULAR_MODELS: &str =
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/popular-models.yaml"));
 
     // Try multiple locations for the popular-models.yaml file
     let possible_paths = vec![
@@ -898,6 +900,22 @@ async fn popular_models_handler(
                     state.log_error(format!("Failed to read {:?}: {}", path, e));
                     continue;
                 }
+            }
+        }
+    }
+
+    if !EMBEDDED_POPULAR_MODELS.trim().is_empty() {
+        match serde_yaml_ng::from_str::<PopularModelsConfig>(EMBEDDED_POPULAR_MODELS) {
+            Ok(config) => {
+                state.log_response(
+                    "/api/popular-models",
+                    "200",
+                    &format!("loaded {} models from embedded catalog", config.models.len()),
+                );
+                return Ok(Json(config.models));
+            }
+            Err(e) => {
+                state.log_error(format!("Failed to parse embedded popular-models.yaml: {}", e));
             }
         }
     }
@@ -1306,10 +1324,11 @@ async fn pull_handler(
         "/api/pull",
         "POST",
         &format!(
-            "name={}, repo={}, file={}, direct={}",
+            "name={}, repo={}, file={}, revision={}, direct={}",
             body.name,
             body.repo_id,
             body.filename,
+            body.revision.clone().unwrap_or_default(),
             body.direct_url.clone().unwrap_or_default()
         ),
     );

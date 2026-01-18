@@ -44,6 +44,7 @@ regex = "1"
 futures-util = "0.3"
 serde_yaml_ng = "0.10"
 tower-http = { version = "0.5", features = ["cors"] }
+urlencoding = "2"
 
 [profile.release]
 strip = true

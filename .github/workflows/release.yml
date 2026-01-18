@@ -37,9 +37,19 @@ jobs:
         working-directory: ui
         run: pnpm install
 
+      - name: Build CLI binary (macOS)
+        working-directory: ui/src-tauri
+        run: cargo build --bin aurora --release
+
       - name: Build Tauri app (macOS)
         working-directory: ui
         run: pnpm tauri build
+
+      - name: Package CLI for macOS
+        run: |
+          mkdir -p aurora-cli-macos
+          cp ui/src-tauri/target/release/aurora aurora-cli-macos/
+          tar -czvf aurora-cli-macos.tar.gz aurora-cli-macos
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -48,6 +58,7 @@ jobs:
           path: |
             ui/src-tauri/target/release/bundle/macos/*.app
             ui/src-tauri/target/release/bundle/dmg/*.dmg
+            aurora-cli-macos.tar.gz
 
   build-windows:
     runs-on: windows-latest
@@ -72,9 +83,19 @@ jobs:
         working-directory: ui
         run: pnpm install
 
+      - name: Build CLI binary (Windows)
+        working-directory: ui/src-tauri
+        run: cargo build --bin aurora --release
+
       - name: Build Tauri app (Windows)
         working-directory: ui
         run: pnpm tauri build
+
+      - name: Package CLI for Windows
+        run: |
+          mkdir aurora-cli-windows
+          cp ui/src-tauri/target/release/aurora.exe aurora-cli-windows/
+          Compress-Archive -Path aurora-cli-windows -DestinationPath aurora-cli-windows.zip
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -83,6 +104,7 @@ jobs:
           path: |
             ui/src-tauri/target/release/bundle/msi/*.msi
             ui/src-tauri/target/release/bundle/nsis/*.exe
+            aurora-cli-windows.zip
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -112,9 +134,19 @@ jobs:
         working-directory: ui
         run: pnpm install
 
+      - name: Build CLI binary (Linux)
+        working-directory: ui/src-tauri
+        run: cargo build --bin aurora --release
+
       - name: Build Tauri app (Linux)
         working-directory: ui
         run: pnpm tauri build
+
+      - name: Package CLI for Linux
+        run: |
+          mkdir -p aurora-cli-linux
+          cp ui/src-tauri/target/release/aurora aurora-cli-linux/
+          tar -czvf aurora-cli-linux.tar.gz aurora-cli-linux
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -123,6 +155,7 @@ jobs:
           path: |
             ui/src-tauri/target/release/bundle/deb/*.deb
             ui/src-tauri/target/release/bundle/appimage/*.AppImage
+            aurora-cli-linux.tar.gz
 
   create-release:
     needs: [build-macos, build-windows, build-linux]
@@ -149,6 +182,8 @@ jobs:
             artifacts/**/*.exe
             artifacts/**/*.deb
             artifacts/**/*.AppImage
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
           draft: false
           prerelease: false
           generate_release_notes: true

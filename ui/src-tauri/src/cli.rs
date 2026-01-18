@@ -416,7 +416,7 @@ async fn run_command(cmd: Commands, api_base: &str) -> Result<(), Box<dyn std::e
             println!("Available Model Templates");
             println!("─────────────────────────");
             for tpl in resp {
-                println!("  {} - {}", tpl.name, tpl.description);
+                println!("  {} ({}) - {}", tpl.name, tpl.id, tpl.description);
             }
         }
 
