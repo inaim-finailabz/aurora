@@ -6,7 +6,6 @@
   "scripts": {
     "desktop:dev": "npm --prefix ui run dev",
     "desktop:build": "npm --prefix ui run build",
-    "desktop:tauri": "npm --prefix ui run tauri -- build",
-    "aurora": "python -m app.cli"
+    "desktop:tauri": "npm --prefix ui run tauri -- build"
   }
-} 
+}

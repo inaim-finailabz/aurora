@@ -1,13 +1,13 @@
 # Aurora
 
-Aurora is a Tauri + React desktop app for local and cloud inference.
+Aurora is a Tauri + React desktop app for local inference against `llama.cpp`/`llama_cpp_2` models bundled into a Rust sidecar.
 
 ## Quickstart
 
 Requirements:
 - Node.js 20+, pnpm
-- Rust & Cargo
-- Python 3.10+ (for the backend)
+- Rust toolchain (install via `rustup`) so the bundled Tauri/Axum backend can compile for your platform
+- GGUF-format `llama.cpp` models stored where Aurora can discover them (default `./models`)
 
 Install & run (development):
 
@@ -18,6 +18,10 @@ pnpm --prefix ui run dev
 # or for desktop dev
 pnpm run desktop:dev
 ```
+
+## Architecture
+- UI: `ui/` is a Vite + React SPA that communicates with the Rust backend via Axios.
+- Backend: `ui/src-tauri` houses the Tauri/Rust server that uses `llama_cpp_2` to load GGUF models, serve `/api/*` endpoints, and power the CLI/terminal panels. No Python runtime is required anymore.
 
 Build and create platform bundles:
 

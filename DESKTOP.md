@@ -1,31 +1,25 @@
 # Aurora desktop shell (macOS / Windows / Linux)
 
-This repository now ships Aurora, a Tauri desktop wrapper in `ui/` that runs the FastAPI backend and talks to the bundled llama.cpp server. The goal is an Ollama-like, self-contained experience across platforms from the brain of FinAI Labz (copyright 2026).
+This repository now ships Aurora as a Tauri desktop wrapper in `ui/`. The UI is a Vite + React SPA that talks to the Rust/Axum sidecar living in `ui/src-tauri`, which loads GGUF-format `llama.cpp` models via the [`llama_cpp_2`](https://docs.rs/llama_cpp_2) crate. No external Python or `llama-server` binary is required—the inference engine runs in-process with the desktop bundle.
 
 ## Prereqs
-- Python 3.10–3.12 with `pip`.
-- Node 18+ (for the Vite/Tauri frontend).
-- Rust toolchain (for Tauri). Install via `rustup`.
-- Platform llama.cpp `llama-server` binary. Place it in the repo root and set `llama_server_path` accordingly.
+- Node.js 20+ and pnpm (or npm/yarn) for the Vite/Tauri frontend.
+- Rust toolchain (install via `rustup`) so Cargo can compile the backend for your current platform; add extra targets (`x86_64-apple-darwin`, `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, etc.) if you plan to cross-build installers.
+- GGUF-format `llama.cpp` models in Aurora's storage directory (default `./models`). The app discovers models automatically and keeps metadata under `config.yaml` + `models/models.json`.
 
 ## Dev run (from repo root)
 ```bash
-npm install --prefix ui   # or pnpm/yarn in ui
-npm run desktop:dev       # spawns backend and opens the desktop window
+pnpm --prefix ui install
+pnpm run desktop:dev
 ```
 
 ## Build installers
 ```bash
-npm run desktop:tauri
+pnpm run desktop:tauri
 ```
-Artifacts land in `ui/src-tauri/target/release/bundle` (AppImage/msi/app).
+Artifacts land in `ui/src-tauri/target/release/bundle` (AppImage/msi/app) and are produced per the host OS; install the matching Rust targets before cross-building for other platforms.
 
 ## Backend notes
-- The Tauri wrapper spawns `python run.py` (override with `PYTHON_BIN`) with working dir at the repo root.
-- API base defaults to `http://127.0.0.1:11435`; change via `VITE_API_BASE`.
-- UI pages: Chat/Completion, Installed Models, Pull + HF search, Settings, Logs (SSE).
-
-## Suggested llama-server args per OS
-- macOS (Apple Silicon): build with `GGML_METAL=ON`; set `--n-gpu-layers 999 --metal --threads 8`.
-- Linux CUDA: build with `-DGGML_CUDA=ON`; args like `--n-gpu-layers 35 --threads 8`.
-- Windows CUDA: build with `-DGGML_CUDA=ON` via MSVC; same args as Linux CUDA. For CPU-only, drop GPU flags and keep `--threads N`.
+- The Rust/Axum server (`ui/src-tauri/src/main.rs`) is spawned automatically by Tauri, listens on `http://127.0.0.1:11435`, and keeps inference state in-process through `llama_cpp_2`. Configuration is persisted to the user's config dir (`~/.config/aurora/config.json`) for storage paths, defaults, and registry entries.
+- `VITE_API_BASE` can override the frontend-to-backend base URL if needed (e.g., remote testing).
+- The UI panels—Chat, Completion, Installed Models, Pull/Search, Settings, Logs, and the terminal-style CLI—talk to `/api/*` endpoints served by the Rust backend. The CLI panel's commands are all implemented client-side and ship with the desktop bundle.
