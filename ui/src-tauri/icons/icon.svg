@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="codeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#4ade80;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#22d3ee;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#bgGrad)"/>
+  
+  <!-- Code brackets -->
+  <path d="M40 44 L28 64 L40 84" stroke="url(#codeGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M88 44 L100 64 L88 84" stroke="url(#codeGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  
+  <!-- AI Brain circle -->
+  <circle cx="64" cy="64" r="18" fill="white" opacity="0.95"/>
+  
+  <!-- Neural network dots -->
+  <circle cx="64" cy="56" r="3" fill="#667eea"/>
+  <circle cx="56" cy="68" r="3" fill="#764ba2"/>
+  <circle cx="72" cy="68" r="3" fill="#764ba2"/>
+  <circle cx="64" cy="72" r="2" fill="#667eea"/>
+  
+  <!-- Neural connections -->
+  <line x1="64" y1="56" x2="56" y2="68" stroke="#667eea" stroke-width="1.5"/>
+  <line x1="64" y1="56" x2="72" y2="68" stroke="#667eea" stroke-width="1.5"/>
+  <line x1="56" y1="68" x2="72" y2="68" stroke="#764ba2" stroke-width="1.5"/>
+  <line x1="64" y1="72" x2="56" y2="68" stroke="#764ba2" stroke-width="1"/>
+  <line x1="64" y1="72" x2="72" y2="68" stroke="#764ba2" stroke-width="1"/>
+</svg>

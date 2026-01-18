@@ -26,6 +26,7 @@ import "./style.css";
 import { useI18n } from "./i18n";
 import logo from "./assets/logo.svg";
 import { open } from "@tauri-apps/api/dialog";
+import { listen } from "@tauri-apps/api/event";
 import AuroraIcon from "./components/icons/AuroraIcon";
 import ThemeToggle from "./components/ThemeToggle";
 import AboutModal from "./components/AboutModal";
@@ -77,7 +78,8 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
   const [improved, setImproved] = useState<string>("");
   const [model, setModel] = useState(defaultModel || "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const models = useQuery({ queryKey: ["models"], queryFn: listModels });
+  // Poll models every 5 seconds to pick up newly pulled models
+  const models = useQuery({ queryKey: ["models"], queryFn: listModels, refetchInterval: 5000 });
   const { t } = useI18n();
   const chatWindowRef = useRef<HTMLDivElement>(null);
 
@@ -403,18 +405,26 @@ function CompletionPanel({ model }: { model: string }) {
 function ModelsPanel() {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const models = useQuery({ queryKey: ["models"], queryFn: listModels });
+  // Poll models every 3 seconds to see newly pulled models
+  const models = useQuery({ queryKey: ["models"], queryFn: listModels, refetchInterval: 3000 });
   const [pullInput, setPullInput] = useState("");
   const [pullStatus, setPullStatus] = useState<{ type: "idle" | "detecting" | "pulling" | "success" | "error"; message: string }>({ type: "idle", message: "" });
   const [searchTerm, setSearchTerm] = useState("");
   const [lastRemoved, setLastRemoved] = useState("");
+  const [activePulls, setActivePulls] = useState<Set<string>>(new Set());
 
   const pull = useMutation({
     mutationFn: pullModel,
     onSuccess: (data) => {
-      setPullStatus({ type: "success", message: `Pulling ${data.name}...` });
+      setPullStatus({ type: "success", message: `⬇️ Downloading ${data.name}... Check logs for progress.` });
+      setActivePulls((prev) => new Set([...prev, data.name]));
       queryClient.invalidateQueries({ queryKey: ["models"] });
       logToBackend(`[PULL] Success: Started pulling ${data.name}`);
+      // Clear pull status after showing success
+      setTimeout(() => {
+        setPullStatus({ type: "idle", message: "" });
+        setPullInput("");
+      }, 3000);
     },
     onError: (err: Error) => {
       setPullStatus({ type: "error", message: err.message });
@@ -947,12 +957,37 @@ function SettingsPanel({ defaults }: { defaults: any }) {
     onSuccess: () => settings.refetch(),
   });
   const [form, setForm] = useState<Record<string, string | number>>({});
+  const [cliStatus, setCliStatus] = useState<{ in_path: boolean; in_local_bin: boolean; local_bin_path: string } | null>(null);
+  const [cliInstallResult, setCliInstallResult] = useState<{ type: "idle" | "success" | "error"; message: string }>({ type: "idle", message: "" });
   const { t } = useI18n();
   const isTauri = typeof window !== "undefined" && Boolean((window as any).__TAURI_IPC__);
+
+  // Check CLI install status on mount
+  useEffect(() => {
+    if (isTauri) {
+      invoke("get_cli_install_status")
+        .then((result: any) => setCliStatus(result))
+        .catch(() => setCliStatus(null));
+    }
+  }, [isTauri]);
+
   useEffect(() => {
     if (settings.data) setForm(settings.data);
     else if (defaults) setForm(defaults);
   }, [settings.data, defaults]);
+
+  const handleInstallCli = async () => {
+    try {
+      setCliInstallResult({ type: "idle", message: "Installing..." });
+      const result = await invoke("install_cli") as string;
+      setCliInstallResult({ type: "success", message: result });
+      // Refresh CLI status
+      const status = await invoke("get_cli_install_status") as any;
+      setCliStatus(status);
+    } catch (err: any) {
+      setCliInstallResult({ type: "error", message: err.toString() });
+    }
+  };
 
   const update = (key: string, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -1055,6 +1090,46 @@ function SettingsPanel({ defaults }: { defaults: any }) {
         {mutation.isSuccess ? t("saved") : ""}
         {mutation.isError ? (mutation.error as Error).message : ""}
       </p>
+
+      {/* CLI Installation Section */}
+      {isTauri && (
+        <div style={{ marginTop: 24, padding: 16, background: "var(--panel-bg)", borderRadius: 8, border: "1px solid var(--border)" }}>
+          <h3 style={{ marginTop: 0 }}>Command Line Interface (CLI)</h3>
+          <p className="status">
+            Install the Aurora CLI to use commands like <code>aurora pull</code>, <code>aurora list</code>, and <code>aurora chat</code> from your terminal.
+          </p>
+
+          {cliStatus && (
+            <div style={{ marginTop: 12, marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className={`status-dot ${cliStatus.in_path ? "green" : "red"}`} style={{ width: 8, height: 8, borderRadius: "50%", background: cliStatus.in_path ? "#22c55e" : "#ef4444" }} />
+                <span>CLI in PATH: {cliStatus.in_path ? "Yes" : "No"}</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: cliStatus.in_local_bin ? "#22c55e" : "#ef4444" }} />
+                <span>Installed at ~/.local/bin: {cliStatus.in_local_bin ? "Yes" : "No"}</span>
+              </div>
+            </div>
+          )}
+
+          <button className="primary" onClick={handleInstallCli} style={{ marginTop: 8 }}>
+            {cliStatus?.in_local_bin ? "Reinstall CLI" : "Install CLI"}
+          </button>
+
+          {cliInstallResult.type !== "idle" && (
+            <div style={{ marginTop: 12, padding: 12, borderRadius: 6, background: cliInstallResult.type === "success" ? "rgba(34, 197, 94, 0.1)" : "rgba(239, 68, 68, 0.1)", whiteSpace: "pre-wrap", fontSize: 12 }}>
+              {cliInstallResult.message}
+            </div>
+          )}
+
+          <p className="status" style={{ marginTop: 12 }}>
+            After installing, add <code>~/.local/bin</code> to your PATH:<br />
+            <code style={{ display: "block", marginTop: 4, padding: 8, background: "var(--bg)", borderRadius: 4 }}>
+              echo 'export PATH="$HOME/.local/bin:$PATH"' &gt;&gt; ~/.zshrc && source ~/.zshrc
+            </code>
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1258,6 +1333,7 @@ function Layout() {
   const defaultModel = useMemo(() => (settings.data as any)?.default_model as string | undefined, [settings.data]);
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: health, refetchInterval: 3000, retry: false });
   const isOnline = healthQuery.status === "pending" ? null : Boolean(healthQuery.data?.status === "ok");
+  const hasModelLoaded = (healthQuery.data as any)?.llama !== false;
   const offlineMessage = healthQuery.isError ? (healthQuery.error as any)?.message || "Backend unreachable" : "";
   const modelName = (healthQuery.data as any)?.default_model || defaultModel || "";
 
@@ -1266,6 +1342,28 @@ function Layout() {
     invoke("start_sidecar").catch((err) => {
       console.warn("Failed to start backend:", err);
     });
+  }, []);
+
+  // Listen for navigation events from system tray
+  useEffect(() => {
+    const isTauri = typeof window !== "undefined" && Boolean((window as any).__TAURI_IPC__);
+    if (!isTauri) return;
+
+    const unlistenNav = listen<string>("navigate", (event) => {
+      const target = event.payload as "home" | "models" | "settings" | "help" | "terminal";
+      if (["home", "models", "settings", "help", "terminal"].includes(target)) {
+        setTab(target);
+      }
+    });
+
+    const unlistenAbout = listen("show-about", () => {
+      setShowAbout(true);
+    });
+
+    return () => {
+      unlistenNav.then((fn) => fn());
+      unlistenAbout.then((fn) => fn());
+    };
   }, []);
 
   useEffect(() => {
@@ -1382,22 +1480,9 @@ function Layout() {
         </div>
 
         <div className="sidebar-footer">
-          {collapsed ? (
-            <button
-              className="about-icon-btn"
-              onClick={() => setShowAbout(true)}
-              title="About Aurora"
-            >
-              <InfoIcon />
-            </button>
-          ) : (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>© 2026 FinAI Labz</div>
-              <button className="pick-btn" onClick={() => setShowAbout(true)}>
-                About
-              </button>
-            </div>
-          )}
+          <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center" }}>
+            © 2026 FinAI Labz
+          </div>
         </div>
 
         <div
@@ -1444,7 +1529,7 @@ function Layout() {
           <img src={logo} alt="Aurora" className="status-logo" />
           <span className="status-app-name">Aurora</span>
         </div>
-        <div className={`status-dot ${isOnline === null ? "amber" : isOnline ? "green" : "red"}`} />
+        <div className={`status-dot ${isOnline === null ? "amber" : isOnline && hasModelLoaded ? "green" : "red"}`} />
         <span className="status-text">
           {isOnline === null ? t("connecting") : isOnline ? t("online") : t("offline")}
         </span>
@@ -1455,6 +1540,9 @@ function Layout() {
         {(healthQuery.data as any)?.llama === false && <span className="status-info">No model loaded</span>}
         <span className="status-sep">·</span>
         <span className="status-text">© 2026 FinAI Labz</span>
+        <button className="status-about-btn" onClick={() => setShowAbout(true)}>
+          About
+        </button>
       </div>
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
     </div>

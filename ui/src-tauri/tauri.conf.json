@@ -13,7 +13,7 @@
     "systemTray": {
       "iconPath": "icons/32x32.png",
       "iconAsTemplate": true,
-      "menuOnLeftClick": true
+      "menuOnLeftClick": false
     },
     "bundle": {
       "active": true,
@@ -27,11 +27,13 @@
         "icons/icon.ico"
       ],
       "resources": [
-        "../../popular-models.yaml"
+        "../../popular-models.yaml",
+        "../../scripts/install-cli.sh",
+        "../../scripts/uninstall-macos.sh",
+        "../../scripts/uninstall-linux.sh",
+        "../../scripts/uninstall-windows.ps1"
       ],
-      "externalBin": [
-        "aurora"
-      ],
+      "externalBin": [],
       "shortDescription": "Local LLM Inference Desktop App",
       "longDescription": "Aurora is a powerful desktop application for running local LLM inference with GGUF models. Built with Rust, React, and Tauri by FinAI Labz.",
       "copyright": "Copyright (c) 2026 FinAI Labz",
@@ -46,19 +48,34 @@
         "minimumSystemVersion": "10.13"
       }
     },
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/finailabz/aurora/releases/latest/download/latest.json"
+      ]
+    },
     "windows": [
       {
         "title": "Aurora",
+        "label": "main",
         "width": 1200,
         "height": 820,
+        "minWidth": 800,
+        "minHeight": 600,
         "resizable": true,
         "fullscreen": false,
-        "center": true
+        "center": true,
+        "decorations": true,
+        "visible": true,
+        "skipTaskbar": false
       }
     ],
     "allowlist": {
       "shell": {
-        "all": true
+        "all": true,
+        "open": true
       },
       "fs": {
         "all": true
@@ -70,6 +87,12 @@
         "all": true
       },
       "dialog": {
+        "all": true
+      },
+      "window": {
+        "all": true
+      },
+      "globalShortcut": {
         "all": true
       }
     },

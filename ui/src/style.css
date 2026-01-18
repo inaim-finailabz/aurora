@@ -788,6 +788,22 @@ button.secondary:hover:not(:disabled) {
   box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
 }
 
+.status-about-btn {
+  width: auto;
+  padding: 4px 10px;
+  margin: 0 0 0 auto;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e5e7eb;
+}
+
+.status-about-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: none;
+  transform: none;
+}
+
 .status-dot.amber {
   background: #f59e0b;
 }

@@ -20,7 +20,8 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
-tauri = { version = "1.5", features = [ "system-tray", "notification-all", "dialog-all", "fs-all", "shell-all", "http-all", "notification", "custom-protocol"] }
+tauri = { version = "1.5", features = [ "system-tray", "notification-all", "dialog-all", "fs-all", "shell-all", "http-all", "notification", "custom-protocol", "updater", "global-shortcut-all", "window-all"] }
+open = "5"
 clap = { version = "4", features = ["derive"] }
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync"] }

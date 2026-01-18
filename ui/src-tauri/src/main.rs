@@ -22,7 +22,7 @@ use parking_lot::RwLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tauri::api::notification::Notification;
-use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem};
+use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem, RunEvent, WindowEvent};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
@@ -130,10 +130,14 @@ struct AppConfig {
 
 impl Default for AppConfig {
     fn default() -> Self {
+        let storage_dir = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("aurora")
+            .join("models");
         Self {
             host: "127.0.0.1".to_string(),
             port: 11435,
-            storage_dir: PathBuf::from("./models"),
+            storage_dir,
             default_model: String::new(),
             models: std::collections::HashMap::new(),
         }
@@ -144,12 +148,20 @@ fn load_config(path: &Path) -> AppConfig {
     if !path.exists() {
         return AppConfig::default();
     }
-    match std::fs::read_to_string(path) {
+    let mut config = match std::fs::read_to_string(path) {
         Ok(content) => serde_yaml_ng::from_str(&content)
             .or_else(|_| serde_json::from_str(&content))
             .unwrap_or_default(),
         Err(_) => AppConfig::default(),
+    };
+
+    if config.storage_dir.is_relative() {
+        if let Some(base) = path.parent() {
+            config.storage_dir = base.join(&config.storage_dir);
+        }
     }
+
+    config
 }
 
 fn save_config(path: &Path, config: &AppConfig) -> anyhow::Result<()> {
@@ -1065,6 +1077,9 @@ async fn models_handler(State(state): State<AppState>) -> Json<ModelsResponse> {
 
     let mut models = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let mut config_count = 0;
+    let mut registry_count = 0;
+    let mut discovered_count = 0;
 
     for (name, path) in &config.models {
         models.push(ModelInfo {
@@ -1072,6 +1087,7 @@ async fn models_handler(State(state): State<AppState>) -> Json<ModelsResponse> {
             path: path.clone(),
             source: "config".to_string(),
         });
+        config_count += 1;
         seen.insert(name.clone());
     }
 
@@ -1082,6 +1098,7 @@ async fn models_handler(State(state): State<AppState>) -> Json<ModelsResponse> {
                 path: entry.path,
                 source: entry.source.unwrap_or_else(|| "registry".to_string()),
             });
+            registry_count += 1;
             seen.insert(entry.name);
         }
     }
@@ -1109,6 +1126,7 @@ async fn models_handler(State(state): State<AppState>) -> Json<ModelsResponse> {
                                         path: subpath.to_string_lossy().to_string(),
                                         source: "discovered".to_string(),
                                     });
+                                    discovered_count += 1;
                                     seen.insert(name);
                                 }
                                 break;
@@ -1127,6 +1145,7 @@ async fn models_handler(State(state): State<AppState>) -> Json<ModelsResponse> {
                             path: path.to_string_lossy().to_string(),
                             source: "discovered".to_string(),
                         });
+                        discovered_count += 1;
                         seen.insert(name);
                     }
                 }
@@ -1134,7 +1153,17 @@ async fn models_handler(State(state): State<AppState>) -> Json<ModelsResponse> {
         }
     }
 
-    state.log_response("/api/models", "200", &format!("found {} models", models.len()));
+    state.log_response(
+        "/api/models",
+        "200",
+        &format!(
+            "found {} models (config={}, registry={}, discovered={})",
+            models.len(),
+            config_count,
+            registry_count,
+            discovered_count
+        ),
+    );
     Json(ModelsResponse { models })
 }
 
@@ -1170,6 +1199,15 @@ async fn chat_handler(
                     let mut inference = state.inference.write();
                     *inference = Some(Arc::new(engine));
                     state.log_model("READY", &model_name, "model loaded successfully");
+                    let mut cfg = state.config.write();
+                    if cfg.default_model != model_name {
+                        cfg.default_model = model_name.clone();
+                        if let Err(e) = save_config(&state.config_path, &cfg) {
+                            state.log_error(format!("Failed to save config: {}", e));
+                        } else {
+                            state.log_model("DEFAULT", &model_name, "set as default model");
+                        }
+                    }
                 }
                 Err(e) => {
                     state.log_error(format!("Failed to load model {}: {}", model_name, e));
@@ -1266,6 +1304,15 @@ async fn generate_handler(
                     let mut inference = state.inference.write();
                     *inference = Some(Arc::new(engine));
                     state.log_model("READY", &model_name, "model loaded successfully");
+                    let mut cfg = state.config.write();
+                    if cfg.default_model != model_name {
+                        cfg.default_model = model_name.clone();
+                        if let Err(e) = save_config(&state.config_path, &cfg) {
+                            state.log_error(format!("Failed to save config: {}", e));
+                        } else {
+                            state.log_model("DEFAULT", &model_name, "set as default model");
+                        }
+                    }
                 }
                 Err(e) => {
                     state.log_error(format!("Failed to load model {}: {}", model_name, e));
@@ -1321,6 +1368,7 @@ async fn pull_handler(
 ) -> Json<PullResponse> {
     let storage_dir = state.config.read().storage_dir.clone();
     let registry_path = state.registry_path();
+    let config_path = state.config_path.clone();
 
     state.log_request(
         "/api/pull",
@@ -1343,15 +1391,23 @@ async fn pull_handler(
     let source = body.source.clone();
     let state_clone = state.clone();
 
+    // Create progress tracker for detailed download logs
+    let progress = DownloadProgress {
+        log_buffer: state.log_buffer.clone(),
+        logs: state.logs.clone(),
+        model_name: name.clone(),
+    };
+
     tokio::spawn(async move {
         let source_desc = direct_url
             .clone()
             .unwrap_or_else(|| format!("{}/{}", repo_id, filename));
         state_clone.log_model(
-            "DOWNLOAD",
+            "PULL",
             &name,
-            &format!("starting from {}", source_desc),
+            &format!("starting download from {}", source_desc),
         );
+        progress.log(&format!("Preparing to download from {}", source_desc));
 
         match download_model(
             &storage_dir,
@@ -1360,6 +1416,7 @@ async fn pull_handler(
             &filename,
             subfolder.as_deref(),
             direct_url.as_deref(),
+            Some(progress.clone()),
         )
         .await
         {
@@ -1376,18 +1433,35 @@ async fn pull_handler(
                 if let Err(e) = save_registry(&registry_path, &registry) {
                     state_clone.log_error(format!("Failed to save registry: {}", e));
                     warn!("Failed to save registry: {}", e);
+                } else {
+                    state_clone.log_model("REGISTRY", &name, "model registered successfully");
+                    progress.log("✓ Model registered in local registry");
                 }
-                state_clone.log_model("DOWNLOADED", &name, &format!("saved to {:?}", model_path));
+
+                {
+                    let mut cfg = state_clone.config.write();
+                    cfg.default_model = name.clone();
+                    if let Err(e) = save_config(&config_path, &cfg) {
+                        state_clone.log_error(format!("Failed to save config: {}", e));
+                    } else {
+                        state_clone.log_model("DEFAULT", &name, "set as default model");
+                        progress.log("✓ Set as default model");
+                    }
+                }
+                state_clone.log_model("COMPLETE", &name, &format!("✓ Model ready at {:?}", model_path));
+                progress.log("✓ Download complete! Model is ready to use.");
             }
             Err(e) => {
+                let err_msg = format!("✗ Download failed: {}", e);
                 state_clone.log_error(format!("Download failed for {}: {}", name, e));
+                progress.log(&err_msg);
             }
         }
     });
 
-    state.log_response("/api/pull", "202", &format!("download queued for {}", body.name));
+    state.log_response("/api/pull", "202", &format!("download started for {}", body.name));
     Json(PullResponse {
-        status: "queued".to_string(),
+        status: "downloading".to_string(),
         name: body.name,
     })
 }
@@ -1456,6 +1530,45 @@ fn find_model_file(storage_dir: &Path, model_name: &str) -> anyhow::Result<PathB
 // Model download from HuggingFace
 // ============================================================================
 
+/// Download progress state for streaming updates
+#[derive(Clone)]
+struct DownloadProgress {
+    log_buffer: LogBuffer,
+    logs: LogTx,
+    model_name: String,
+}
+
+impl DownloadProgress {
+    fn log(&self, msg: &str) {
+        let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+        let line = format!("{} DOWNLOAD [{}] {}", timestamp, self.model_name, msg);
+        self.log_buffer.push(line.clone());
+        let _ = self.logs.0.send(line);
+    }
+
+    fn log_progress(&self, downloaded: u64, total: Option<u64>, filename: &str) {
+        let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+        let (percent, size_info) = if let Some(t) = total {
+            let pct = (downloaded as f64 / t as f64 * 100.0).min(100.0);
+            (
+                format!("{:.1}%", pct),
+                format!("{:.2}MB / {:.2}MB", downloaded as f64 / 1_048_576.0, t as f64 / 1_048_576.0),
+            )
+        } else {
+            (
+                "??%".to_string(),
+                format!("{:.2}MB", downloaded as f64 / 1_048_576.0),
+            )
+        };
+        let line = format!(
+            "{} DOWNLOAD [{}] {} - {} ({})",
+            timestamp, self.model_name, filename, size_info, percent
+        );
+        self.log_buffer.push(line.clone());
+        let _ = self.logs.0.send(line);
+    }
+}
+
 async fn download_model(
     storage_dir: &Path,
     name: &str,
@@ -1463,6 +1576,7 @@ async fn download_model(
     filename: &str,
     subfolder: Option<&str>,
     direct_url: Option<&str>,
+    progress: Option<DownloadProgress>,
 ) -> anyhow::Result<PathBuf> {
     let model_dir = storage_dir.join(name);
     std::fs::create_dir_all(&model_dir)?;
@@ -1500,39 +1614,74 @@ async fn download_model(
         vec![(file, url)]
     };
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3600)) // 1 hour timeout for large files
+        .build()?;
 
-    for (file, url) in files_to_download {
+    let total_files = files_to_download.len();
+
+    for (idx, (file, url)) in files_to_download.into_iter().enumerate() {
         let dest_path = model_dir.join(&file);
         if dest_path.exists() {
+            if let Some(ref p) = progress {
+                p.log(&format!("File {} already exists, skipping", file));
+            }
             info!("file already exists: {:?}", dest_path);
             continue;
         }
 
+        if let Some(ref p) = progress {
+            p.log(&format!("Starting download ({}/{}) from {}", idx + 1, total_files, url));
+        }
         info!("downloading {} to {:?}", url, dest_path);
 
         let response = client
-            .get(url)
+            .get(&url)
             .header("User-Agent", "Aurora/0.1")
             .send()
             .await?;
 
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "Failed to download {}: {}",
-                file,
-                response.status()
-            ));
+            let status = response.status();
+            let err_msg = format!("Failed to download {}: HTTP {} - {}", file, status.as_u16(), status.canonical_reason().unwrap_or("Unknown error"));
+            if let Some(ref p) = progress {
+                p.log(&err_msg);
+            }
+            return Err(anyhow::anyhow!("{}", err_msg));
+        }
+
+        let content_length = response.content_length();
+        if let Some(ref p) = progress {
+            if let Some(len) = content_length {
+                p.log(&format!("File size: {:.2}MB", len as f64 / 1_048_576.0));
+            }
         }
 
         let mut dest_file = std::fs::File::create(&dest_path)?;
         let mut stream = response.bytes_stream();
+        let mut downloaded: u64 = 0;
+        let mut last_log_time = std::time::Instant::now();
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             dest_file.write_all(&chunk)?;
+            downloaded += chunk.len() as u64;
+
+            // Log progress every 2 seconds or every 10MB
+            if last_log_time.elapsed() > std::time::Duration::from_secs(2) ||
+               downloaded % (10 * 1024 * 1024) < chunk.len() as u64 {
+                if let Some(ref p) = progress {
+                    p.log_progress(downloaded, content_length, &file);
+                }
+                last_log_time = std::time::Instant::now();
+            }
         }
 
+        // Final progress log
+        if let Some(ref p) = progress {
+            p.log_progress(downloaded, content_length, &file);
+            p.log(&format!("✓ Downloaded {} ({:.2}MB)", file, downloaded as f64 / 1_048_576.0));
+        }
         info!("downloaded: {:?}", dest_path);
     }
 
@@ -1579,11 +1728,15 @@ fn router(state: AppState) -> Router {
 
 async fn spawn_server(state: AppState) -> anyhow::Result<(SocketAddr, JoinHandle<()>)> {
     let port = state.config.read().port;
+    let storage_dir = state.config.read().storage_dir.clone();
+    let config_path = state.config_path.clone();
     let app = router(state.clone());
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     let addr = listener.local_addr()?;
     info!("Aurora backend starting on {}", addr);
     state.log(format!("Aurora backend starting on {}", addr));
+    state.log(format!("Config path: {:?}", config_path));
+    state.log(format!("Storage dir: {:?}", storage_dir));
 
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -1597,19 +1750,26 @@ async fn spawn_server(state: AppState) -> anyhow::Result<(SocketAddr, JoinHandle
 
 fn build_tray() -> SystemTray {
     let open = CustomMenuItem::new("open".to_string(), "Open Aurora");
-    let quit = CustomMenuItem::new("quit".to_string(), "Quit");
+    let status = CustomMenuItem::new("status".to_string(), "Status: Starting...").disabled();
+    let models = CustomMenuItem::new("models".to_string(), "Manage Models");
+    let updates = CustomMenuItem::new("updates".to_string(), "Check for Updates");
+    let about = CustomMenuItem::new("about".to_string(), "About Aurora");
+    let quit = CustomMenuItem::new("quit".to_string(), "Quit Aurora");
 
     let menu = SystemTrayMenu::new()
         .add_item(open)
         .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(status)
+        .add_item(models)
+        .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(updates)
+        .add_item(about)
+        .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(quit);
 
-    let mut tray = SystemTray::new().with_menu(menu);
-    #[cfg(target_os = "macos")]
-    {
-        tray = tray.with_icon_as_template(true);
-    }
-    tray
+    SystemTray::new()
+        .with_menu(menu)
+        .with_tooltip("Aurora - Local LLM Inference")
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
@@ -1639,11 +1799,47 @@ fn handle_tray_event(app: &tauri::AppHandle, event: SystemTrayEvent) {
     match event {
         SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
             "open" => show_main_window(app),
-            "quit" => app.exit(0),
+            "models" => {
+                show_main_window(app);
+                // Emit event to switch to models tab
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.emit("navigate", "models");
+                }
+            }
+            "updates" => {
+                // Open GitHub releases page
+                let _ = open::that("https://github.com/finailabz/aurora/releases");
+            }
+            "about" => {
+                show_main_window(app);
+                // Emit event to show about modal
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.emit("show-about", ());
+                }
+            }
+            "quit" => {
+                // Clean shutdown
+                info!("Aurora quitting...");
+                app.exit(0);
+            }
             _ => {}
         },
         SystemTrayEvent::LeftClick { .. } => toggle_main_window(app),
+        SystemTrayEvent::DoubleClick { .. } => show_main_window(app),
         _ => {}
+    }
+}
+
+/// Update the tray menu status item
+fn update_tray_status(app: &tauri::AppHandle, status: &str, model: Option<&str>) {
+    let status_text = if let Some(m) = model {
+        format!("Status: Online - {}", m)
+    } else {
+        format!("Status: {}", status)
+    };
+
+    if let Err(e) = app.tray_handle().get_item("status").set_title(&status_text) {
+        warn!("Failed to update tray status: {}", e);
     }
 }
 
@@ -1711,6 +1907,101 @@ fn send_notification(app: tauri::AppHandle, title: String, body: String) -> Resu
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn install_cli() -> Result<String, String> {
+    // Get the path to the CLI binary bundled with the app
+    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe_dir = exe_path.parent().ok_or("Failed to get exe directory")?;
+
+    // The CLI binary is bundled alongside the main app binary
+    let cli_src = exe_dir.join("aurora");
+
+    if !cli_src.exists() {
+        // Try alternate locations
+        let alt_locations = [
+            exe_dir.join("../Resources/aurora"),
+            exe_dir.join("aurora-cli"),
+        ];
+
+        for alt in &alt_locations {
+            if alt.exists() {
+                return install_cli_from_path(alt);
+            }
+        }
+
+        return Err(format!(
+            "CLI binary not found. Looked in: {:?}, {:?}",
+            cli_src,
+            alt_locations
+        ));
+    }
+
+    install_cli_from_path(&cli_src)
+}
+
+fn install_cli_from_path(src: &Path) -> Result<String, String> {
+    // Prefer ~/.local/bin (no sudo needed)
+    let home = dirs::home_dir().ok_or("Failed to get home directory")?;
+    let local_bin = home.join(".local").join("bin");
+
+    // Create directory if needed
+    if let Err(e) = std::fs::create_dir_all(&local_bin) {
+        return Err(format!("Failed to create ~/.local/bin: {}", e));
+    }
+
+    let dest = local_bin.join("aurora");
+
+    // Copy the binary
+    if let Err(e) = std::fs::copy(src, &dest) {
+        return Err(format!("Failed to copy CLI binary: {}", e));
+    }
+
+    // Make executable
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755)) {
+            return Err(format!("Failed to set permissions: {}", e));
+        }
+    }
+
+    let path_instruction = format!(
+        "Add this to your ~/.zshrc or ~/.bashrc:\nexport PATH=\"{}:$PATH\"",
+        local_bin.display()
+    );
+
+    Ok(format!(
+        "✓ Installed Aurora CLI to {}\n\n{}\n\nTest: aurora --version",
+        dest.display(),
+        path_instruction
+    ))
+}
+
+#[tauri::command]
+fn get_cli_install_status() -> Result<serde_json::Value, String> {
+    // Check if aurora CLI is in PATH
+    let in_path = std::process::Command::new("which")
+        .arg("aurora")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    // Check if CLI exists in ~/.local/bin
+    let home = dirs::home_dir().ok_or("Failed to get home directory")?;
+    let local_bin_aurora = home.join(".local").join("bin").join("aurora");
+    let in_local_bin = local_bin_aurora.exists();
+
+    // Check if CLI exists in /usr/local/bin
+    let in_usr_local = Path::new("/usr/local/bin/aurora").exists();
+
+    Ok(serde_json::json!({
+        "in_path": in_path,
+        "in_local_bin": in_local_bin,
+        "in_usr_local": in_usr_local,
+        "local_bin_path": local_bin_aurora.to_string_lossy(),
+    }))
+}
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -1740,23 +2031,100 @@ fn main() {
         config_path,
     };
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(log_state)
         .manage(log_buffer)
-        .invoke_handler(tauri::generate_handler![start_sidecar, send_notification])
+        .invoke_handler(tauri::generate_handler![start_sidecar, send_notification, install_cli, get_cli_install_status])
         .system_tray(build_tray())
         .on_system_tray_event(|app, event| handle_tray_event(app, event))
-        .setup(move |_app| {
+        .on_window_event(|event| {
+            // Hide window instead of closing when user clicks close button
+            if let WindowEvent::CloseRequested { api, .. } = event.event() {
+                // Hide the window instead of closing it
+                event.window().hide().unwrap();
+                api.prevent_close();
+
+                // Show notification that app is still running in tray
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = Notification::new(&event.window().app_handle().config().tauri.bundle.identifier)
+                        .title("Aurora is still running")
+                        .body("Aurora is minimized to the system tray. Click the tray icon to open.")
+                        .show();
+                }
+            }
+        })
+        .setup(move |app| {
             // Auto-start the backend server
             let state = auto_start_state.clone();
+            let app_handle = app.handle();
+
             tauri::async_runtime::spawn(async move {
                 match spawn_server(state).await {
-                    Ok((addr, _)) => info!("Aurora backend auto-started on {}", addr),
-                    Err(e) => warn!("Failed to auto-start backend: {}", e),
+                    Ok((addr, _)) => {
+                        info!("Aurora backend auto-started on {}", addr);
+                        update_tray_status(&app_handle, "Online", None);
+                    }
+                    Err(e) => {
+                        warn!("Failed to auto-start backend: {}", e);
+                        update_tray_status(&app_handle, "Error", None);
+                    }
                 }
             });
+
+            // Check for updates on startup (non-blocking)
+            #[cfg(not(debug_assertions))]
+            {
+                let handle = app.handle();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    check_for_updates(&handle).await;
+                });
+            }
+
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        match event {
+            RunEvent::ExitRequested { api, .. } => {
+                // Prevent the app from exiting when all windows are closed
+                // The app should keep running in the system tray
+                api.prevent_exit();
+            }
+            RunEvent::Ready => {
+                info!("Aurora app is ready");
+                update_tray_status(app_handle, "Starting...", None);
+            }
+            _ => {}
+        }
+    });
+}
+
+/// Check for updates from GitHub releases
+#[cfg(not(debug_assertions))]
+async fn check_for_updates(app: &tauri::AppHandle) {
+    use tauri::updater::UpdateResponse;
+
+    match app.updater().check().await {
+        Ok(update) => {
+            if update.is_update_available() {
+                info!("Update available: {}", update.latest_version());
+                if let Err(e) = Notification::new(&app.config().tauri.bundle.identifier)
+                    .title("Aurora Update Available")
+                    .body(&format!("Version {} is available. Click to update.", update.latest_version()))
+                    .show()
+                {
+                    warn!("Failed to show update notification: {}", e);
+                }
+            } else {
+                info!("Aurora is up to date ({})", update.current_version());
+            }
+        }
+        Err(e) => {
+            warn!("Failed to check for updates: {}", e);
+        }
+    }
 }
