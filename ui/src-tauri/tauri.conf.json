@@ -4,8 +4,8 @@
     "version": "0.1.0"
   },
   "build": {
-    "beforeDevCommand": "vite dev --host 0.0.0.0 --port 4175",
-    "beforeBuildCommand": "vite build",
+    "beforeDevCommand": "pnpm --prefix .. exec vite dev -- --host 0.0.0.0 --port 4175",
+    "beforeBuildCommand": "pnpm --prefix .. exec vite build",
     "devPath": "http://localhost:4175",
     "distDir": "../dist"
   },
