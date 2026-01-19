@@ -1445,7 +1445,7 @@ function Layout() {
           <HamburgerIcon />
         </button>
         <div className="brand">
-          <div className="brand-logo-badge">A</div>
+          <img src={logo} alt="Aurora" className="brand-logo" />
           {!collapsed && <div className="brand-text">{t("brand")}</div>}
         </div>
         {[
