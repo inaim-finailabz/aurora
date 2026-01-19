@@ -2,6 +2,8 @@
 
 Aurora is a Tauri + React desktop app for local inference against `llama.cpp`/`llama_cpp_2` models bundled into a Rust sidecar.
 
+> Source is available for **non-commercial use only**. Commercial use requires a separate license from FinAI Labz.
+
 ## Quickstart
 
 Requirements:
