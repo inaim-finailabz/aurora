@@ -71,63 +71,6 @@ jobs:
           name: aurora-cli-macos
           path: aurora-cli-macos-aarch64.tar.gz
 
-  build-macos-intel:
-    runs-on: macos-13
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install dependencies
-        working-directory: ui
-        run: pnpm install
-
-      - name: Build CLI binary (macOS Intel)
-        working-directory: ui/src-tauri
-        run: cargo build --bin aurora --release
-
-      - name: Build Tauri app (macOS Intel)
-        working-directory: ui
-        run: pnpm tauri build || true
-
-      - name: Create DMG manually if needed
-        working-directory: ui/src-tauri/target/release/bundle/macos
-        run: |
-          if [ ! -f Aurora_*.dmg ]; then
-            hdiutil create -volname "Aurora" -srcfolder Aurora.app -ov -format UDZO Aurora_0.1.0_x64.dmg
-          fi
-
-      - name: Package CLI for macOS Intel
-        run: |
-          mkdir -p aurora-cli-macos
-          cp ui/src-tauri/target/release/aurora aurora-cli-macos/
-          chmod +x aurora-cli-macos/aurora
-          tar -czvf aurora-cli-macos-x64.tar.gz aurora-cli-macos
-
-      - name: Upload macOS Intel DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: aurora-macos-intel-dmg
-          path: ui/src-tauri/target/release/bundle/macos/*.dmg
-
-      - name: Upload macOS Intel CLI
-        uses: actions/upload-artifact@v4
-        with:
-          name: aurora-cli-macos-intel
-          path: aurora-cli-macos-x64.tar.gz
-
   build-windows:
     runs-on: windows-latest
     steps:
@@ -245,7 +188,7 @@ jobs:
           path: aurora-cli-linux-x64.tar.gz
 
   create-release:
-    needs: [build-macos, build-macos-intel, build-windows, build-linux]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -279,13 +222,11 @@ jobs:
 
             **Desktop App:**
             - **macOS (Apple Silicon):** `Aurora_*_aarch64.dmg`
-            - **macOS (Intel):** `Aurora_*_x64.dmg`
             - **Windows:** `Aurora_*_x64-setup.exe` (NSIS) or `Aurora_*.msi`
             - **Linux:** `aurora_*.deb` or `aurora_*.AppImage`
 
             **CLI Only:**
             - **macOS (Apple Silicon):** `aurora-cli-macos-aarch64.tar.gz`
-            - **macOS (Intel):** `aurora-cli-macos-x64.tar.gz`
             - **Windows:** `aurora-cli-windows.zip`
             - **Linux:** `aurora-cli-linux-x64.tar.gz`
 
