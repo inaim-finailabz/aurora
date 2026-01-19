@@ -2058,14 +2058,14 @@ fn get_cli_install_status() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn uninstall_aurora(app_handle: tauri::AppHandle) -> Result<String, String> {
-    // Get the uninstall script path from resources
-    let resource_path = app_handle
-        .path_resolver()
-        .resolve_resource("uninstall-macos.sh")
-        .ok_or("Uninstall script not found")?;
-
     #[cfg(target_os = "macos")]
     {
+        // Get the uninstall script path from resources
+        let resource_path = app_handle
+            .path_resolver()
+            .resolve_resource("uninstall-macos.sh")
+            .ok_or("Uninstall script not found")?;
+
         // Run the uninstall script
         let output = std::process::Command::new("bash")
             .arg(&resource_path)

@@ -108,12 +108,6 @@ jobs:
           Copy-Item ui/src-tauri/target/release/aurora.exe aurora-cli-windows/
           Compress-Archive -Path aurora-cli-windows -DestinationPath aurora-cli-windows.zip
 
-      - name: Upload Windows MSI
-        uses: actions/upload-artifact@v4
-        with:
-          name: aurora-windows-msi
-          path: ui/src-tauri/target/release/bundle/msi/*.msi
-
       - name: Upload Windows NSIS installer
         uses: actions/upload-artifact@v4
         with:
@@ -205,7 +199,7 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release-files
-          find artifacts -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-files/ \;
+          find artifacts -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-files/ \;
           ls -la release-files/
 
       - name: Create Release
@@ -222,7 +216,7 @@ jobs:
 
             **Desktop App:**
             - **macOS (Apple Silicon):** `Aurora_*_aarch64.dmg`
-            - **Windows:** `Aurora_*_x64-setup.exe` (NSIS) or `Aurora_*.msi`
+            - **Windows:** `Aurora_*_x64-setup.exe`
             - **Linux:** `aurora_*.deb` or `aurora_*.AppImage`
 
             **CLI Only:**
