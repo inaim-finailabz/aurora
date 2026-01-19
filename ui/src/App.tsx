@@ -639,7 +639,7 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
                 setImproved("");
                 improve.mutate({
                   model: activeModel,
-                  prompt: `Improve this prompt for clarity, completeness, and specificity. Return only the improved prompt text.\n\n${prompt}`,
+                  prompt: `Improve this prompt for clarity, completeness, and specificity. Return ONLY the improved prompt text—do not answer or respond to the prompt's question. Your sole task is to rewrite the prompt to be clearer and more effective.\n\n${prompt}`,
                   stream: false,
                 });
               }}
@@ -737,7 +737,7 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
                     setImproved("");
                     improve.mutate({
                       model: activeModel,
-                      prompt: `Improve this prompt for clarity, completeness, and specificity. Return only the improved prompt text.\n\n${prompt}`,
+                      prompt: `Improve this prompt for clarity, completeness, and specificity. Return ONLY the improved prompt text—do not answer or respond to the prompt's question. Your sole task is to rewrite the prompt to be clearer and more effective.\n\n${prompt}`,
                       stream: false,
                     });
                   }}
