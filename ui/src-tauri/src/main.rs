@@ -145,23 +145,59 @@ impl Default for AppConfig {
 }
 
 fn load_config(path: &Path) -> AppConfig {
-    if !path.exists() {
-        return AppConfig::default();
-    }
-    let mut config = match std::fs::read_to_string(path) {
-        Ok(content) => serde_yaml_ng::from_str(&content)
-            .or_else(|_| serde_json::from_str(&content))
-            .unwrap_or_default(),
-        Err(_) => AppConfig::default(),
+    let mut config = if !path.exists() {
+        AppConfig::default()
+    } else {
+        match std::fs::read_to_string(path) {
+            Ok(content) => serde_yaml_ng::from_str(&content)
+                .or_else(|_| serde_json::from_str(&content))
+                .unwrap_or_default(),
+            Err(_) => AppConfig::default(),
+        }
     };
 
-    if config.storage_dir.is_relative() {
-        if let Some(base) = path.parent() {
-            config.storage_dir = base.join(&config.storage_dir);
-        }
+    // Ensure storage_dir is absolute and writable
+    // If it's relative or in a read-only location, use the default user data directory
+    if config.storage_dir.is_relative() || !is_writable_dir(&config.storage_dir) {
+        let default_storage = dirs::data_dir()
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")))
+            .join("aurora")
+            .join("models");
+        config.storage_dir = default_storage;
     }
 
     config
+}
+
+/// Check if a directory is writable (or can be created)
+fn is_writable_dir(path: &Path) -> bool {
+    if path.exists() {
+        // Try to check if we can write to it
+        let test_file = path.join(".aurora_write_test");
+        match std::fs::write(&test_file, b"test") {
+            Ok(_) => {
+                let _ = std::fs::remove_file(&test_file);
+                true
+            }
+            Err(_) => false,
+        }
+    } else {
+        // Check if we can create the parent directory
+        if let Some(parent) = path.parent() {
+            if parent.exists() {
+                // Try to create the directory
+                match std::fs::create_dir_all(path) {
+                    Ok(_) => true,
+                    Err(_) => false,
+                }
+            } else {
+                // Recursively check parent
+                is_writable_dir(parent)
+            }
+        } else {
+            false
+        }
+    }
 }
 
 fn save_config(path: &Path, config: &AppConfig) -> anyhow::Result<()> {
@@ -1752,8 +1788,10 @@ fn build_tray() -> SystemTray {
     let open = CustomMenuItem::new("open".to_string(), "Open Aurora");
     let status = CustomMenuItem::new("status".to_string(), "Status: Starting...").disabled();
     let models = CustomMenuItem::new("models".to_string(), "Manage Models");
+    let settings = CustomMenuItem::new("settings".to_string(), "Settings");
     let updates = CustomMenuItem::new("updates".to_string(), "Check for Updates");
     let about = CustomMenuItem::new("about".to_string(), "About Aurora");
+    let uninstall = CustomMenuItem::new("uninstall".to_string(), "Uninstall Aurora...");
     let quit = CustomMenuItem::new("quit".to_string(), "Quit Aurora");
 
     let menu = SystemTrayMenu::new()
@@ -1761,10 +1799,12 @@ fn build_tray() -> SystemTray {
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(status)
         .add_item(models)
+        .add_item(settings)
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(updates)
         .add_item(about)
         .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(uninstall)
         .add_item(quit);
 
     SystemTray::new()
@@ -1806,6 +1846,13 @@ fn handle_tray_event(app: &tauri::AppHandle, event: SystemTrayEvent) {
                     let _ = window.emit("navigate", "models");
                 }
             }
+            "settings" => {
+                show_main_window(app);
+                // Emit event to switch to settings tab
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.emit("navigate", "settings");
+                }
+            }
             "updates" => {
                 // Open GitHub releases page
                 let _ = open::that("https://github.com/finailabz/aurora/releases");
@@ -1815,6 +1862,13 @@ fn handle_tray_event(app: &tauri::AppHandle, event: SystemTrayEvent) {
                 // Emit event to show about modal
                 if let Some(window) = app.get_window("main") {
                     let _ = window.emit("show-about", ());
+                }
+            }
+            "uninstall" => {
+                show_main_window(app);
+                // Emit event to show uninstall confirmation
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.emit("show-uninstall", ());
                 }
             }
             "quit" => {
@@ -2002,6 +2056,103 @@ fn get_cli_install_status() -> Result<serde_json::Value, String> {
     }))
 }
 
+#[tauri::command]
+fn uninstall_aurora(app_handle: tauri::AppHandle) -> Result<String, String> {
+    // Get the uninstall script path from resources
+    let resource_path = app_handle
+        .path_resolver()
+        .resolve_resource("uninstall-macos.sh")
+        .ok_or("Uninstall script not found")?;
+
+    #[cfg(target_os = "macos")]
+    {
+        // Run the uninstall script
+        let output = std::process::Command::new("bash")
+            .arg(&resource_path)
+            .output()
+            .map_err(|e| format!("Failed to run uninstall script: {}", e))?;
+
+        if output.status.success() {
+            // Quit the app after successful uninstall
+            app_handle.exit(0);
+            Ok("Aurora uninstalled successfully".to_string())
+        } else {
+            Err(format!(
+                "Uninstall failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let linux_script = app_handle
+            .path_resolver()
+            .resolve_resource("uninstall-linux.sh")
+            .ok_or("Uninstall script not found")?;
+
+        let output = std::process::Command::new("bash")
+            .arg(&linux_script)
+            .output()
+            .map_err(|e| format!("Failed to run uninstall script: {}", e))?;
+
+        if output.status.success() {
+            app_handle.exit(0);
+            Ok("Aurora uninstalled successfully".to_string())
+        } else {
+            Err(format!(
+                "Uninstall failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let win_script = app_handle
+            .path_resolver()
+            .resolve_resource("uninstall-windows.ps1")
+            .ok_or("Uninstall script not found")?;
+
+        let output = std::process::Command::new("powershell")
+            .args(["-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&win_script)
+            .output()
+            .map_err(|e| format!("Failed to run uninstall script: {}", e))?;
+
+        if output.status.success() {
+            app_handle.exit(0);
+            Ok("Aurora uninstalled successfully".to_string())
+        } else {
+            Err(format!(
+                "Uninstall failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
+        }
+    }
+}
+
+#[tauri::command]
+fn get_app_data_paths() -> Result<serde_json::Value, String> {
+    let config_dir = dirs::config_dir()
+        .map(|p| p.join("aurora"))
+        .map(|p| p.to_string_lossy().to_string());
+
+    let data_dir = dirs::data_dir()
+        .map(|p| p.join("aurora"))
+        .map(|p| p.to_string_lossy().to_string());
+
+    let cache_dir = dirs::cache_dir()
+        .map(|p| p.join("aurora"))
+        .map(|p| p.to_string_lossy().to_string());
+
+    Ok(serde_json::json!({
+        "config_dir": config_dir,
+        "data_dir": data_dir,
+        "cache_dir": cache_dir,
+    }))
+}
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -2034,7 +2185,7 @@ fn main() {
     let app = tauri::Builder::default()
         .manage(log_state)
         .manage(log_buffer)
-        .invoke_handler(tauri::generate_handler![start_sidecar, send_notification, install_cli, get_cli_install_status])
+        .invoke_handler(tauri::generate_handler![start_sidecar, send_notification, install_cli, get_cli_install_status, uninstall_aurora, get_app_data_paths])
         .system_tray(build_tray())
         .on_system_tray_event(|app, event| handle_tray_event(app, event))
         .on_window_event(|event| {
@@ -2106,8 +2257,6 @@ fn main() {
 /// Check for updates from GitHub releases
 #[cfg(not(debug_assertions))]
 async fn check_for_updates(app: &tauri::AppHandle) {
-    use tauri::updater::UpdateResponse;
-
     match app.updater().check().await {
         Ok(update) => {
             if update.is_update_available() {

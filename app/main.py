@@ -337,6 +337,7 @@ async def generate(payload: Dict[str, Any]) -> Any:
         "temperature": float(options.get("temperature", 0.7)),
         "top_p": float(options.get("top_p", 0.95)),
         "stream": stream,
+        "echo": False,
     }
 
     if stream:

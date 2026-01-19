@@ -76,6 +76,7 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
     }
   });
   const [improved, setImproved] = useState<string>("");
+  const [improveStatus, setImproveStatus] = useState<string>("");
   const [model, setModel] = useState(defaultModel || "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   // Poll models every 5 seconds to pick up newly pulled models
@@ -87,6 +88,20 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
     mutationFn: chatOnce,
     onSuccess: (data) => {
       setMessages((prev) => [...prev, { role: "assistant", content: data.message?.content || "" }]);
+    },
+  });
+  const improve = useMutation({
+    mutationFn: generate,
+    onSuccess: (data) => {
+      const response = data.response || "";
+      setImproved(response);
+      if (response) {
+        setPrompt(response);
+      }
+      setImproveStatus("ready");
+    },
+    onError: (err: Error) => {
+      setImproveStatus(err.message || "Failed to improve prompt");
     },
   });
 
@@ -347,13 +362,28 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
                   className="pick-btn"
                   onClick={() => {
                     if (!prompt.trim()) return;
-                    setImproved(prompt + " (improved)");
+                    const activeModel = model || defaultModel;
+                    if (!activeModel) {
+                      setImproveStatus("Select a model first.");
+                      return;
+                    }
+                    setImproveStatus("improving");
+                    setImproved("");
+                    improve.mutate({
+                      model: activeModel,
+                      prompt: `Improve this prompt for clarity, completeness, and specificity. Return only the improved prompt text.\n\n${prompt}`,
+                      stream: false,
+                    });
                   }}
-                  disabled={!prompt.trim()}
+                  disabled={!prompt.trim() || improve.isPending}
                 >
-                  {t("improvePrompt")}
+                  {improve.isPending ? t("generating") : t("improvePrompt")}
                 </button>
-                {improved && <span className="status">{t("improved")}</span>}
+                {improveStatus && (
+                  <span className="status">
+                    {improveStatus === "improving" ? t("generating") : improveStatus === "ready" ? t("improved") : improveStatus}
+                  </span>
+                )}
               </div>
               {improved && <div className="message assistant">{improved}</div>}
             </div>
@@ -1327,6 +1357,7 @@ function Layout() {
   });
   const [dragging, setDragging] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showUninstall, setShowUninstall] = useState(false);
   const settings = useQuery({ queryKey: ["settings"], queryFn: getSettings });
   const { t, locale, setLocale } = useI18n();
   const queryClient = useQueryClient();
@@ -1360,9 +1391,14 @@ function Layout() {
       setShowAbout(true);
     });
 
+    const unlistenUninstall = listen("show-uninstall", () => {
+      setShowUninstall(true);
+    });
+
     return () => {
       unlistenNav.then((fn) => fn());
       unlistenAbout.then((fn) => fn());
+      unlistenUninstall.then((fn) => fn());
     };
   }, []);
 
@@ -1545,6 +1581,7 @@ function Layout() {
         </button>
       </div>
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
+      <UninstallModal open={showUninstall} onClose={() => setShowUninstall(false)} />
     </div>
   );
 }

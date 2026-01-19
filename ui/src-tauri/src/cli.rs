@@ -241,12 +241,26 @@ async fn run_command(cmd: Commands, api_base: &str) -> Result<(), Box<dyn std::e
                 (repo.clone(), None)
             };
 
+            // Normalize slashes (replace backslash with forward slash)
+            let repo_id = repo_id.replace('\\', "/");
+
+            // Validate repo format
+            if !repo_id.contains('/') {
+                return Err(format!(
+                    "Invalid repository format: '{}'\nExpected format: owner/repo (e.g., TinyLlama/TinyLlama-1.1B-Chat-v1.0-GGUF)",
+                    repo_id
+                ).into());
+            }
+
             // Fetch repo info from HuggingFace
             let hf_url = format!("https://huggingface.co/api/models/{}", repo_id);
             let hf_resp = client.get(&hf_url).send().await?;
-            
+
             if !hf_resp.status().is_success() {
-                return Err(format!("Repository not found: {}", repo_id).into());
+                return Err(format!(
+                    "Repository not found: {}\nMake sure the repository exists on huggingface.co/{}",
+                    repo_id, repo_id
+                ).into());
             }
 
             let hf_data: serde_json::Value = hf_resp.json().await?;
