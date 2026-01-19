@@ -344,4 +344,17 @@ export function logsStream(onLine: (line: string) => void, onError?: (err: strin
   return () => source.close();
 }
 
+export async function fetchModelInfo(repoId: string) {
+  const res = await fetch(`https://huggingface.co/api/models/${repoId}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HF model fetch failed: ${res.status}`);
+  }
+  return res.json() as Promise<{
+    pipeline_tag?: string;
+    tags?: string[];
+    modelId?: string;
+  }>;
+}
+
 export { API_BASE };

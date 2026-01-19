@@ -389,10 +389,17 @@ async def chat(payload: Dict[str, Any]) -> Any:
     if attachments and isinstance(messages[-1].get("content"), str) and messages[-1].get("role", "user") == "user":
         content_parts: List[Any] = [{"type": "text", "text": messages[-1]["content"]}]
         for att in attachments:
+            name = att.get("name") or "attachment"
+            text = att.get("text")
+            mime = str(att.get("type") or att.get("mime_type") or "")
             url = att.get("data_url") or att.get("url")
-            if not url:
+            if text:
+                content_parts.append({"type": "text", "text": f"\n\n[Attachment: {name}]\n{text}"})
                 continue
-            content_parts.append({"type": "image_url", "image_url": {"url": url}})
+            if url and mime.startswith("image/"):
+                content_parts.append({"type": "image_url", "image_url": {"url": url}})
+                continue
+            content_parts.append({"type": "text", "text": f"\n\n[Attachment: {name}] (Unsupported file type: {mime or 'unknown'})"})
         messages[-1] = {**messages[-1], "content": content_parts}
 
     request_payload = {

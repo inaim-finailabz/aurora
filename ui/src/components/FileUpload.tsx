@@ -6,6 +6,14 @@ export interface Attachment {
   data_url: string;
   size: number;
   mime_type: string;
+  text?: string;
+}
+
+export interface AttachmentCapabilities {
+  text: boolean;
+  images: boolean;
+  audio: boolean;
+  documents: boolean;
 }
 
 interface FileUploadProps {
@@ -14,18 +22,51 @@ interface FileUploadProps {
   onRemoveAttachment: (index: number) => void;
   accept?: string;
   maxSizeMB?: number;
+  capabilities?: AttachmentCapabilities;
+  showAttachmentsInline?: boolean;
 }
 
 export default function FileUpload({
   onFilesSelected,
   attachments,
   onRemoveAttachment,
-  accept = "image/*,.pdf,.txt,.md,.json,.csv",
+  accept = "image/*,.txt,.md,.json,.csv",
   maxSizeMB = 10,
+  capabilities = { text: true, images: true, audio: false, documents: false },
+  showAttachmentsInline = true,
 }: FileUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string>("");
+
+  const classifyFile = (file: File) => {
+    const name = file.name.toLowerCase();
+    const type = file.type.toLowerCase();
+    if (type.startsWith("image/")) return "image";
+    if (type.startsWith("audio/") || name.match(/\.(mp3|wav|m4a|aac|flac|ogg)$/)) return "audio";
+    if (
+      type.startsWith("text/") ||
+      ["application/json", "text/csv", "application/csv", "application/xml"].includes(type) ||
+      name.match(/\.(txt|md|markdown|json|csv|log|yaml|yml)$/)
+    )
+      return "text";
+    if (
+      type === "application/pdf" ||
+      type === "application/msword" ||
+      type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      name.match(/\.(pdf|doc|docx)$/)
+    )
+      return "document";
+    return "other";
+  };
+
+  const isAllowed = (kind: string) => {
+    if (kind === "image") return capabilities.images;
+    if (kind === "audio") return capabilities.audio;
+    if (kind === "document") return capabilities.documents;
+    if (kind === "text") return capabilities.text;
+    return false;
+  };
 
   const processFiles = useCallback(
     async (fileList: FileList | null) => {
@@ -43,7 +84,31 @@ export default function FileUpload({
           continue;
         }
 
+        const kind = classifyFile(file);
+        if (!isAllowed(kind)) {
+          setError(`"${file.name}" isn't supported by the current model.`);
+          continue;
+        }
+
         try {
+          if (kind === "text") {
+            const text = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result || ""));
+              reader.onerror = reject;
+              reader.readAsText(file);
+            });
+            newAttachments.push({
+              type: "file",
+              name: file.name,
+              data_url: "",
+              size: file.size,
+              mime_type: file.type,
+              text,
+            });
+            continue;
+          }
+
           const dataUrl = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result as string);
@@ -51,7 +116,7 @@ export default function FileUpload({
             reader.readAsDataURL(file);
           });
 
-          const isImage = file.type.startsWith("image/");
+          const isImage = kind === "image";
           newAttachments.push({
             type: isImage ? "image" : "file",
             name: file.name,
@@ -108,7 +173,12 @@ export default function FileUpload({
   };
 
   return (
-    <div className="file-upload-container">
+    <div
+      className={`file-upload-inline ${dragOver ? "drag-over" : ""}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <input
         type="file"
         ref={fileInputRef}
@@ -118,67 +188,63 @@ export default function FileUpload({
         style={{ display: "none" }}
       />
 
-      <div
-        className={`file-upload-dropzone ${dragOver ? "drag-over" : ""}`}
+      <button
+        type="button"
+        className="file-upload-btn"
         onClick={handleClick}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        title="Attach files"
       >
-        <div className="file-upload-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="17,8 12,3 7,8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-        </div>
-        <div className="file-upload-text">
-          <span className="file-upload-primary">Click to upload</span>
-          <span className="file-upload-secondary"> or drag and drop</span>
-        </div>
-        <div className="file-upload-hint">
-          Images, PDFs, text files (max {maxSizeMB}MB)
-        </div>
-      </div>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+        </svg>
+      </button>
 
-      {error && <div className="file-upload-error">{error}</div>}
-
-      {attachments.length > 0 && (
-        <div className="file-upload-attachments">
-          {attachments.map((att, idx) => (
-            <div key={idx} className="attachment-item">
-              {att.type === "image" ? (
-                <img src={att.data_url} alt={att.name} className="attachment-preview" />
-              ) : (
-                <div className="attachment-file-icon">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14,2 14,8 20,8" />
-                  </svg>
-                </div>
-              )}
-              <div className="attachment-info">
-                <div className="attachment-name">{att.name}</div>
-                <div className="attachment-size">{formatSize(att.size)}</div>
-              </div>
-              <button
-                type="button"
-                className="attachment-remove"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveAttachment(idx);
-                }}
-                title="Remove"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-          ))}
-        </div>
+      {showAttachmentsInline && (
+        <AttachmentChips attachments={attachments} onRemoveAttachment={onRemoveAttachment} />
       )}
+
+      {error && <div className="file-upload-error-inline">{error}</div>}
+    </div>
+  );
+}
+
+export function AttachmentChips({
+  attachments,
+  onRemoveAttachment,
+}: {
+  attachments: Attachment[];
+  onRemoveAttachment: (index: number) => void;
+}) {
+  if (attachments.length === 0) return null;
+
+  return (
+    <div className="file-upload-attachments-inline">
+      {attachments.map((att, idx) => (
+        <div key={idx} className="attachment-chip">
+          {att.type === "image" && att.data_url ? (
+            <img src={att.data_url} alt={att.name} className="attachment-chip-preview" />
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14,2 14,8 20,8" />
+            </svg>
+          )}
+          <span className="attachment-chip-name">{att.name}</span>
+          <button
+            type="button"
+            className="attachment-chip-remove"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemoveAttachment(idx);
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

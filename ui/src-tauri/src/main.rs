@@ -27,6 +27,17 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn};
+use once_cell::sync::OnceCell;
+
+// Global singleton for LlamaBackend - can only be initialized once
+static LLAMA_BACKEND: OnceCell<LlamaBackend> = OnceCell::new();
+
+fn get_llama_backend() -> anyhow::Result<&'static LlamaBackend> {
+    Ok(LLAMA_BACKEND.get_or_try_init(|| {
+        info!("Initializing LlamaBackend singleton");
+        LlamaBackend::init()
+    })?)
+}
 
 // ============================================================================
 // Log handling
@@ -211,27 +222,26 @@ fn save_config(path: &Path, config: &AppConfig) -> anyhow::Result<()> {
 // ============================================================================
 
 struct InferenceEngine {
-    backend: LlamaBackend,
     model: LlamaModel,
     model_name: String,
 }
 
 impl InferenceEngine {
     fn new(gguf_path: &Path, model_name: &str) -> anyhow::Result<Self> {
-        let backend = LlamaBackend::init()?;
+        let backend = get_llama_backend()?;
         let model_params = LlamaModelParams::default();
-        let model = LlamaModel::load_from_file(&backend, gguf_path, &model_params)?;
+        let model = LlamaModel::load_from_file(backend, gguf_path, &model_params)?;
 
         Ok(Self {
-            backend,
             model,
             model_name: model_name.to_string(),
         })
     }
 
     fn generate(&self, prompt: &str, max_tokens: u32) -> anyhow::Result<String> {
+        let backend = get_llama_backend()?;
         let ctx_params = LlamaContextParams::default().with_n_ctx(std::num::NonZeroU32::new(2048));
-        let mut ctx = self.model.new_context(&self.backend, ctx_params)?;
+        let mut ctx = self.model.new_context(backend, ctx_params)?;
 
         // Tokenize the prompt
         let tokens = self
@@ -284,6 +294,10 @@ impl InferenceEngine {
             .iter()
             .filter_map(|t| self.model.token_to_str(*t, llama_cpp_2::model::Special::Tokenize).ok())
             .collect::<String>();
+
+        if output.is_empty() && output_tokens.is_empty() {
+            return Err(anyhow::anyhow!("Model generated no output. Try a different prompt or model."));
+        }
 
         Ok(output)
     }
@@ -1524,7 +1538,16 @@ async fn index_handler() -> axum::response::Html<&'static str> {
 fn load_model(storage_dir: &Path, model_name: &str) -> anyhow::Result<InferenceEngine> {
     let gguf = find_model_file(storage_dir, model_name)?;
     info!("loading model from {:?}", gguf);
-    InferenceEngine::new(&gguf, model_name)
+
+    // Check if file exists and get size
+    let metadata = std::fs::metadata(&gguf)?;
+    let size_mb = metadata.len() as f64 / 1_048_576.0;
+    info!("Model file size: {:.2} MB", size_mb);
+
+    InferenceEngine::new(&gguf, model_name).map_err(|e| {
+        warn!("Failed to load model {}: {}", model_name, e);
+        anyhow::anyhow!("Failed to load model: {}. The model may require more memory or be incompatible.", e)
+    })
 }
 
 fn find_model_file(storage_dir: &Path, model_name: &str) -> anyhow::Result<PathBuf> {

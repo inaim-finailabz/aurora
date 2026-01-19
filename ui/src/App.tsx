@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef, lazy, Suspense } from "react";
+import { cleanImprovedPrompt as cleanPrompt } from "./utils/prompt";
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   API_BASE,
@@ -18,6 +19,7 @@ import {
   listCustomModels,
   createCustomModel,
   deleteCustomModel,
+  fetchModelInfo,
   CustomModelConfig,
   CustomModelParameters,
   ModelTemplate,
@@ -37,7 +39,7 @@ import LogsIcon from "./components/icons/LogsIcon";
 import HelpIcon from "./components/icons/HelpIcon";
 import TerminalIcon from "./components/icons/TerminalIcon";
 import ChatMessage from "./components/ChatMessage";
-import FileUpload, { Attachment } from "./components/FileUpload";
+import FileUpload, { Attachment, AttachmentCapabilities, AttachmentChips } from "./components/FileUpload";
 import UninstallModal from "./components/UninstallModal";
 import { invoke } from "@tauri-apps/api/tauri";
 
@@ -64,6 +66,66 @@ const client = new QueryClient({
   },
 });
 
+const CAPABILITIES_STORAGE_PREFIX = "aurora_model_capabilities:";
+
+function deriveCapabilities(modelName: string, info?: { pipeline_tag?: string; tags?: string[] }): AttachmentCapabilities {
+  const tags = (info?.tags || []).map((tag) => tag.toLowerCase());
+  const pipeline = (info?.pipeline_tag || "").toLowerCase();
+  const modelLabel = (modelName || "").toLowerCase();
+  const tagSet = new Set(tags);
+
+  const visionPipelines = new Set([
+    "image-to-text",
+    "image-text-to-text",
+    "visual-question-answering",
+    "image-to-image",
+    "image-classification",
+    "image-segmentation",
+  ]);
+  const audioPipelines = new Set([
+    "automatic-speech-recognition",
+    "audio-classification",
+    "text-to-speech",
+    "text-to-audio",
+    "audio-to-audio",
+  ]);
+  const documentPipelines = new Set(["document-question-answering"]);
+
+  const looksVision = /(vision|llava|qwen-vl|internvl|moondream|vila|vl|multimodal)/i.test(modelLabel);
+  const looksAudio = /(whisper|asr|audio|speech)/i.test(modelLabel);
+  const looksDocument = /(document|doc|pdf)/i.test(modelLabel);
+
+  const images = visionPipelines.has(pipeline) || tagSet.has("vision") || tagSet.has("image") || looksVision;
+  const audio = audioPipelines.has(pipeline) || tagSet.has("audio") || looksAudio;
+  const documents = documentPipelines.has(pipeline) || tagSet.has("document") || looksDocument;
+
+  return {
+    text: true,
+    images,
+    audio,
+    documents,
+  };
+}
+
+function readStoredCapabilities(modelName: string): AttachmentCapabilities | null {
+  if (!modelName) return null;
+  try {
+    const raw = localStorage.getItem(`${CAPABILITIES_STORAGE_PREFIX}${modelName}`);
+    return raw ? (JSON.parse(raw) as AttachmentCapabilities) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredCapabilities(modelName: string, caps: AttachmentCapabilities) {
+  if (!modelName) return;
+  try {
+    localStorage.setItem(`${CAPABILITIES_STORAGE_PREFIX}${modelName}`, JSON.stringify(caps));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
 function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -84,6 +146,39 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
   const models = useQuery({ queryKey: ["models"], queryFn: listModels, refetchInterval: 5000 });
   const { t } = useI18n();
   const chatWindowRef = useRef<HTMLDivElement>(null);
+  const selectedModel = useMemo(
+    () => (models.data?.models || []).find((m: any) => m.name === model),
+    [models.data, model]
+  );
+  const modelInfo = useQuery({
+    queryKey: ["hf-model-info", selectedModel?.repo_id],
+    queryFn: () => fetchModelInfo(String(selectedModel?.repo_id)),
+    enabled: Boolean(selectedModel?.repo_id),
+    retry: 1,
+  });
+  const storedCapabilities = useMemo(
+    () => readStoredCapabilities(selectedModel?.name || model),
+    [selectedModel?.name, model]
+  );
+  const computedCapabilities = useMemo(
+    () => deriveCapabilities(selectedModel?.name || model, modelInfo.data),
+    [modelInfo.data, model, selectedModel?.name]
+  );
+  const attachmentCapabilities: AttachmentCapabilities = storedCapabilities || computedCapabilities;
+  const uploadAccept = useMemo(() => {
+    const parts: string[] = [];
+    if (attachmentCapabilities.images) parts.push("image/*");
+    if (attachmentCapabilities.text) parts.push(".txt,.md,.json,.csv,.log,.yaml,.yml");
+    if (attachmentCapabilities.documents) parts.push(".pdf,.doc,.docx");
+    if (attachmentCapabilities.audio) parts.push("audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg");
+    return parts.join(",");
+  }, [attachmentCapabilities]);
+
+  useEffect(() => {
+    if (selectedModel?.name || model) {
+      writeStoredCapabilities(selectedModel?.name || model, computedCapabilities);
+    }
+  }, [computedCapabilities, model, selectedModel?.name]);
 
   const chat = useMutation({
     mutationFn: chatOnce,
@@ -91,13 +186,41 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
       setMessages((prev) => [...prev, { role: "assistant", content: data.message?.content || "" }]);
     },
   });
+  const cleanImprovedPrompt = (text: string) => {
+    let s = (text || "").trim();
+    // If the model returned a fenced block, extract the inner content
+    const tripleMatch = s.match(/```(?:\w*\n)?([\s\S]*?)```/);
+    if (tripleMatch) s = tripleMatch[1].trim();
+
+    // Remove surrounding quotes if present
+    const quoteMatch = s.match(/^(["'“”‘’])([\s\S]+)\1$/);
+    if (quoteMatch) s = quoteMatch[2].trim();
+
+    // Remove common leading labels and blank lines
+    const lines = s.split(/\r?\n/).map((l) => l.trim());
+    let start = 0;
+    while (
+      start < lines.length &&
+      (/^(improved prompt|here'?s an? improved prompt|prompt:|suggested prompt|improved:)/i.test(lines[start]) || lines[start] === "")
+    ) {
+      start++;
+    }
+    let candidate = lines.slice(start).join("\n").trim();
+    if (candidate) s = candidate;
+
+    // Strip leading label-like fragments (e.g., "Improved:")
+    s = s.replace(/^[^:\n]+:\s*/, "");
+    return s.trim();
+  };
+
   const improve = useMutation({
     mutationFn: generate,
     onSuccess: (data) => {
       const response = data.response || "";
-      setImproved(response);
-      if (response) {
-        setPrompt(response);
+      const cleaned = cleanPrompt(response);
+      setImproved(cleaned);
+      if (cleaned) {
+        setPrompt(cleaned);
       }
       setImproveStatus("ready");
     },
@@ -135,6 +258,7 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
         data_url: att.data_url,
         name: att.name,
         type: att.mime_type,
+        text: att.text,
       }));
     }
 
@@ -241,12 +365,6 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
             ))}
           </div>
 
-          <FileUpload
-            onFilesSelected={handleFilesSelected}
-            attachments={attachments}
-            onRemoveAttachment={handleRemoveAttachment}
-          />
-
           <label>{t("promptLabel")}</label>
           <textarea
             rows={4}
@@ -260,6 +378,8 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
               }
             }}
           />
+
+          <AttachmentChips attachments={attachments} onRemoveAttachment={handleRemoveAttachment} />
 
           <div className="input-row">
             <input
@@ -283,10 +403,45 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
             </button>
           </div>
 
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <div className="chat-input-toolbar">
+            <FileUpload
+              onFilesSelected={handleFilesSelected}
+              attachments={attachments}
+              onRemoveAttachment={handleRemoveAttachment}
+              accept={uploadAccept}
+              capabilities={attachmentCapabilities}
+              showAttachmentsInline={false}
+            />
             <button className="primary" onClick={sendPrompt} disabled={chat.isPending}>
               {chat.isPending ? t("thinking") : t("send")}
             </button>
+            <button
+              type="button"
+              className="pick-btn"
+              onClick={() => {
+                if (!prompt.trim()) return;
+                const activeModel = model || defaultModel;
+                if (!activeModel) {
+                  setImproveStatus("Select a model first.");
+                  return;
+                }
+                setImproveStatus("improving");
+                setImproved("");
+                improve.mutate({
+                  model: activeModel,
+                  prompt: `Improve this prompt for clarity, completeness, and specificity. Return only the improved prompt text.\n\n${prompt}`,
+                  stream: false,
+                });
+              }}
+              disabled={!prompt.trim() || improve.isPending}
+            >
+              {improve.isPending ? t("generating") : t("improvePrompt")}
+            </button>
+            {improveStatus && (
+              <span className="status" style={{ marginLeft: 8 }}>
+                {improveStatus === "improving" ? t("generating") : improveStatus === "ready" ? t("improved") : improveStatus}
+              </span>
+            )}
             <span className="status" style={{ fontSize: 11 }}>Ctrl+Enter to send</span>
             <p className="status">{chat.isError ? (chat.error as Error).message : ""}</p>
           </div>
@@ -443,6 +598,7 @@ function ModelsPanel() {
   const [searchTerm, setSearchTerm] = useState("");
   const [lastRemoved, setLastRemoved] = useState("");
   const [activePulls, setActivePulls] = useState<Set<string>>(new Set());
+  const [infoModelName, setInfoModelName] = useState("");
 
   const pull = useMutation({
     mutationFn: pullModel,
@@ -481,6 +637,33 @@ function ModelsPanel() {
       })
       .slice(0, 30);
   }, [aiWiki.data, searchTerm]);
+
+  const infoModel = useMemo(
+    () => (models.data?.models || []).find((m: any) => m.name === infoModelName),
+    [models.data, infoModelName]
+  );
+  const infoQuery = useQuery({
+    queryKey: ["hf-model-info", infoModel?.repo_id],
+    queryFn: () => fetchModelInfo(String(infoModel?.repo_id)),
+    enabled: Boolean(infoModel?.repo_id),
+    retry: 1,
+  });
+  const infoCapabilities = useMemo(
+    () => deriveCapabilities(infoModel?.name || infoModelName, infoQuery.data),
+    [infoModel?.name, infoModelName, infoQuery.data]
+  );
+
+  useEffect(() => {
+    if (!infoModelName && (models.data?.models || []).length > 0) {
+      setInfoModelName(models.data?.models?.[0]?.name || "");
+    }
+  }, [infoModelName, models.data]);
+
+  useEffect(() => {
+    if (infoModel?.name || infoModelName) {
+      writeStoredCapabilities(infoModel?.name || infoModelName, infoCapabilities);
+    }
+  }, [infoCapabilities, infoModel?.name, infoModelName]);
 
   // Ollama-style pull: just enter repo name, auto-detect everything
   const handlePull = async () => {
@@ -613,13 +796,15 @@ function ModelsPanel() {
                 </div>
                 <div className="input-row" style={{ width: 180 }}>
                   <span className="badge">{m.source}</span>
-                  <button
-                    className="pick-btn"
-                    onClick={() => removeModelEntry(m.name)}
-                    disabled={remove.isPending && remove.variables === m.name}
-                  >
-                    {remove.isPending && remove.variables === m.name ? t("removing") : t("remove")}
-                  </button>
+                  {m.source !== "discovered" && (
+                    <button
+                      className="pick-btn"
+                      onClick={() => removeModelEntry(m.name)}
+                      disabled={remove.isPending && remove.variables === m.name}
+                    >
+                      {remove.isPending && remove.variables === m.name ? t("removing") : t("remove")}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -629,6 +814,48 @@ function ModelsPanel() {
             <p className="status">{t("removed")} {lastRemoved}</p>
           )}
           {remove.isError && <p className="status">{(remove.error as Error).message}</p>}
+
+          <div className="panel" style={{ marginTop: 12 }}>
+            <h4>Model capabilities</h4>
+            {(models.data?.models || []).length > 0 ? (
+              <>
+                <label>Select model</label>
+                <select
+                  value={infoModelName}
+                  onChange={(e) => setInfoModelName(e.target.value)}
+                  style={{ width: "100%" }}
+                >
+                  {(models.data?.models || []).map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <div className="status">Install a model to see capabilities.</div>
+            )}
+
+            {(infoModelName || infoModel?.name) && (
+              <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                <span className="badge">Text</span>
+                {infoCapabilities.images && <span className="badge">Images</span>}
+                {infoCapabilities.documents && <span className="badge">Documents</span>}
+                {infoCapabilities.audio && <span className="badge">Audio</span>}
+                {!infoCapabilities.images && !infoCapabilities.documents && !infoCapabilities.audio && (
+                  <span className="status">Text-only model</span>
+                )}
+              </div>
+            )}
+
+            {infoQuery.isFetching && <div className="status" style={{ marginTop: 8 }}>Fetching Hugging Face metadata...</div>}
+            {infoQuery.isError && <div className="status" style={{ marginTop: 8 }}>{(infoQuery.error as Error).message}</div>}
+            {infoQuery.data && (
+              <div className="status" style={{ marginTop: 8 }}>
+                Pipeline: {infoQuery.data.pipeline_tag || "unknown"} · Tags: {(infoQuery.data.tags || []).slice(0, 6).join(", ") || "none"}
+              </div>
+            )}
+          </div>
         </div>
         <div>
           <h3>Popular Models</h3>
