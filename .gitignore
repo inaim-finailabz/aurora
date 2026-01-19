@@ -29,3 +29,5 @@ ui/src-tauri/Cargo.lock
 # Local data
 models/
 .env
+.env.*
+!.env.example

@@ -6,7 +6,7 @@ This project is released under the **PolyForm Noncommercial License 1.0.0**. Tha
 - **Commercial use is prohibited** unless you obtain a separate commercial license from FinAI Labz.
 
 ## How to request a commercial license
-Email licensing@finailabz.example with the following information:
+Email licensing@finailabz.com with the following information:
 - Your organization/company name
 - Intended commercial use (how you will distribute/sell or incorporate the software)
 - Estimated number of users or expected revenue model
@@ -42,6 +42,6 @@ Estimated users / revenue model: <details>
 Support: <requested SLA/support level if any>
 ```
 
-Send to: licensing@finailabz.example
+Send to: licensing@finailabz.com
 
 > Note: This is not legal advice. For binding terms and licensing questions please consult your legal counsel and we will provide a formal license agreement for signature.

@@ -9,6 +9,12 @@ Requirements:
 - Rust toolchain (install via `rustup`) so the bundled Tauri/Axum backend can compile for your platform
 - GGUF-format `llama.cpp` models stored where Aurora can discover them (default `./models`)
 
+Quickstart (binaries):
+- Download the latest release for your OS from `https://github.com/inaim-finailabz/aurora/releases`
+- macOS: open `Aurora.dmg`, drag Aurora into Applications, and launch
+- Windows: run the `.exe` installer
+- Linux: install the `.deb` or run the `.AppImage`
+
 Install & run (development):
 
 ```bash
@@ -31,6 +37,12 @@ pnpm --prefix ui run tauri -- build
 ```
 
 Releases are automated via GitHub Actions: see `.github/workflows/release.yml` and `RELEASES.md`.
+
+## Downloads
+- GitHub Releases (all platforms): `https://github.com/inaim-finailabz/aurora/releases`
+- macOS DMG: `Aurora_*.dmg`
+- Windows installers: `.msi` and `.exe`
+- Linux packages: `.deb` and `.AppImage`
 
 ## CLI (aurora)
 
@@ -110,9 +122,13 @@ Please read `CONTRIBUTING.md` for contribution guidelines.
 
 - **Pre-built Binaries** (GitHub Releases): Licensed under the **MIT License** (`LICENSE-BINARIES`). You are free to use, distribute, and modify the binaries for any purpose, including commercial use.
 
-- **Source Code**: Licensed under the **PolyForm Noncommercial License 1.0.0** (`LICENSE`). You may use, copy, and modify the source code for non-commercial purposes only. Commercial use of the source code is prohibited without obtaining a separate commercial license from FinAI Labz.
+- **Source Code**: Licensed under the **PolyForm Noncommercial License 1.0.0** (`LICENSE`, `LICENSE-NONCOMMERCIAL.md`). You may use, copy, and modify the source code for non-commercial purposes only. Commercial use of the source code is prohibited without obtaining a separate commercial license from FinAI Labz.
 
 For commercial licensing inquiries, see `LICENSE-FAQ.md` or contact licensing@finailabz.com.
+
+## Contact & Social
+- GitHub: https://github.com/inaim-finailabz
+- Licensing: licensing@finailabz.com
 
 ## Theme
 

@@ -51,6 +51,7 @@ import ChatMessage from "./components/ChatMessage";
 import FileUpload, { Attachment, AttachmentCapabilities, AttachmentChips } from "./components/FileUpload";
 import UninstallModal from "./components/UninstallModal";
 import { invoke } from "@tauri-apps/api/tauri";
+import { open as openExternal } from "@tauri-apps/api/shell";
 
 // Lazy load XTerminal to avoid SSR issues
 const XTerminal = lazy(() => import("./components/XTerminal"));
@@ -1805,6 +1806,15 @@ function Layout() {
   const hasModelLoaded = (healthQuery.data as any)?.llama !== false;
   const offlineMessage = healthQuery.isError ? (healthQuery.error as any)?.message || "Backend unreachable" : "";
   const modelName = (healthQuery.data as any)?.default_model || defaultModel || "";
+  const feedbackAuthUrl = "https://aurora.finailabz.com/auth/google";
+
+  const handleFeedbackSignIn = async () => {
+    try {
+      await openExternal(feedbackAuthUrl);
+    } catch {
+      window.open(feedbackAuthUrl, "_blank", "noopener,noreferrer");
+    }
+  };
 
   // Auto-start backend on app launch
   useEffect(() => {
@@ -1975,6 +1985,17 @@ function Layout() {
         >
           <HamburgerIcon />
         </button>
+        <div className="top-actions">
+          <button
+            className="google-auth-btn"
+            onClick={handleFeedbackSignIn}
+            title="Sign in to Aurora to share feedback"
+            aria-label="Sign in with Google to share feedback"
+          >
+            <span className="google-badge" aria-hidden="true">G</span>
+            Sign in with Google
+          </button>
+        </div>
         {healthQuery.isError && (
           <div className="offline-banner">
             <strong>Backend not reachable.</strong> {offlineMessage || "Cannot reach API"} at {API_BASE}. Ensure it is running, or pick a free port.
