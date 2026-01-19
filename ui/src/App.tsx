@@ -38,6 +38,7 @@ import HelpIcon from "./components/icons/HelpIcon";
 import TerminalIcon from "./components/icons/TerminalIcon";
 import ChatMessage from "./components/ChatMessage";
 import FileUpload, { Attachment } from "./components/FileUpload";
+import UninstallModal from "./components/UninstallModal";
 import { invoke } from "@tauri-apps/api/tauri";
 
 // Lazy load XTerminal to avoid SSR issues

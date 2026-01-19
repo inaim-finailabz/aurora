@@ -2223,16 +2223,6 @@ fn main() {
                 }
             });
 
-            // Check for updates on startup (non-blocking)
-            #[cfg(not(debug_assertions))]
-            {
-                let handle = app.handle();
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    check_for_updates(&handle).await;
-                });
-            }
-
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -2254,26 +2244,3 @@ fn main() {
     });
 }
 
-/// Check for updates from GitHub releases
-#[cfg(not(debug_assertions))]
-async fn check_for_updates(app: &tauri::AppHandle) {
-    match app.updater().check().await {
-        Ok(update) => {
-            if update.is_update_available() {
-                info!("Update available: {}", update.latest_version());
-                if let Err(e) = Notification::new(&app.config().tauri.bundle.identifier)
-                    .title("Aurora Update Available")
-                    .body(&format!("Version {} is available. Click to update.", update.latest_version()))
-                    .show()
-                {
-                    warn!("Failed to show update notification: {}", e);
-                }
-            } else {
-                info!("Aurora is up to date ({})", update.current_version());
-            }
-        }
-        Err(e) => {
-            warn!("Failed to check for updates: {}", e);
-        }
-    }
-}
