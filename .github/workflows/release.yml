@@ -19,6 +19,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      
+      - name: Set build version
+        shell: bash
+        run: |
+          VERSION_INPUT="${{ github.event.inputs.version }}"
+          VERSION_REF="${{ github.ref_name }}"
+          VERSION="${VERSION_INPUT:-$VERSION_REF}"
+          if [ -z "$VERSION" ]; then
+            VERSION="v0.0.0"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "VERSION_NUMBER=${VERSION#v}" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -43,13 +55,14 @@ jobs:
 
       - name: Build Tauri app (macOS)
         working-directory: ui
-        run: pnpm tauri build || true
+        run: pnpm tauri build
+        continue-on-error: true
 
       - name: Create DMG manually if needed
         working-directory: ui/src-tauri/target/release/bundle/macos
         run: |
-          if [ ! -f Aurora_*.dmg ]; then
-            hdiutil create -volname "Aurora" -srcfolder Aurora.app -ov -format UDZO Aurora_0.1.0_aarch64.dmg
+          if ! ls ../dmg/*.dmg 1>/dev/null 2>&1 && ! ls *.dmg 1>/dev/null 2>&1; then
+            hdiutil create -volname "Aurora" -srcfolder Aurora.app -ov -format UDZO "Aurora_${VERSION_NUMBER}_aarch64.dmg"
           fi
 
       - name: Package CLI for macOS
@@ -63,7 +76,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aurora-macos-dmg
-          path: ui/src-tauri/target/release/bundle/macos/*.dmg
+          path: |
+            ui/src-tauri/target/release/bundle/macos/*.dmg
+            ui/src-tauri/target/release/bundle/dmg/*.dmg
 
       - name: Upload macOS CLI
         uses: actions/upload-artifact@v4
