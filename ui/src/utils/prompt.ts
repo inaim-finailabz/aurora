@@ -15,7 +15,7 @@ export function cleanImprovedPrompt(text: string): string {
   while (
     start < lines.length &&
     (
-      /^(improved prompt|here'?s an? improved prompt|suggested prompt|suggested:|prompt:|improved:)/i.test(lines[start]) ||
+      /^(improved prompt|here'?s an? improved prompt|suggested prompt|suggested|prompt|improved)\s*[:\-]?\s*$/i.test(lines[start]) ||
       lines[start] === ""
     )
   ) {

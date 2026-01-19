@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::routing::{get, post};
+use axum::routing::{get, post, delete};
 use axum::{Json, Router};
 use chrono::Utc;
 use futures_util::StreamExt;
@@ -28,6 +28,9 @@ use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn};
 use once_cell::sync::OnceCell;
+
+mod session;
+use session::{SessionStore, Session, SessionMessage, SessionContext, EpisodicMemory};
 
 // Global singleton for LlamaBackend - can only be initialized once
 static LLAMA_BACKEND: OnceCell<LlamaBackend> = OnceCell::new();
@@ -314,6 +317,10 @@ struct AppState {
     inference: Arc<RwLock<Option<Arc<InferenceEngine>>>>,
     config: Arc<RwLock<AppConfig>>,
     config_path: PathBuf,
+    // Session & Memory Store
+    session_store: Arc<SessionStore>,
+    // Current active session ID (per-app instance)
+    current_session: Arc<RwLock<Option<String>>>,
 }
 
 impl AppState {
@@ -492,6 +499,81 @@ struct LogsQuery {
 
 fn default_log_limit() -> usize {
     200
+}
+
+// ============================================================================
+// Session API Request/Response types
+// ============================================================================
+
+#[derive(Deserialize)]
+struct CreateSessionRequest {
+    model: Option<String>,
+    title: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CreateSessionResponse {
+    session: Session,
+}
+
+#[derive(Serialize)]
+struct SessionListResponse {
+    sessions: Vec<Session>,
+    current_session_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SessionContextResponse {
+    context: SessionContext,
+}
+
+#[derive(Serialize)]
+struct SessionMessagesResponse {
+    messages: Vec<SessionMessage>,
+}
+
+#[derive(Deserialize)]
+struct AddMessageRequest {
+    role: String,
+    content: String,
+    #[serde(default)]
+    metadata: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RecordMemoryRequest {
+    event_type: String,
+    summary: String,
+    session_id: Option<String>,
+    #[serde(default)]
+    metadata: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MemoryListResponse {
+    memories: Vec<EpisodicMemory>,
+}
+
+#[derive(Deserialize)]
+struct ChatWithSessionRequest {
+    session_id: Option<String>,  // If None, creates new session
+    model: Option<String>,
+    messages: Vec<Message>,
+    #[serde(default)]
+    stream: bool,
+    #[serde(default)]
+    options: Option<InferenceOptions>,
+    #[serde(default)]
+    persist: Option<bool>,  // Whether to persist messages to session (default: true)
+}
+
+#[derive(Serialize)]
+struct ChatWithSessionResponse {
+    model: String,
+    message: Message,
+    done: bool,
+    session_id: String,
+    message_count: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1516,6 +1598,489 @@ async fn pull_handler(
     })
 }
 
+// ============================================================================
+// Session API Handlers
+// ============================================================================
+
+/// Create a new session
+async fn create_session_handler(
+    State(state): State<AppState>,
+    Json(body): Json<CreateSessionRequest>,
+) -> Result<Json<CreateSessionResponse>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/sessions", "POST", "creating new session");
+
+    match state.session_store.create_session(
+        body.model.as_deref(),
+        body.title.as_deref(),
+    ) {
+        Ok(session) => {
+            // Set as current session
+            {
+                let mut current = state.current_session.write();
+                *current = Some(session.id.clone());
+            }
+
+            // Record to episodic memory
+            let _ = state.session_store.record_memory(
+                "session_created",
+                &format!("New session started: {}", session.title.as_deref().unwrap_or("Untitled")),
+                Some(&session.id),
+                None,
+            );
+
+            state.log_response("/api/sessions", "201", &format!("created session {}", session.id));
+            Ok(Json(CreateSessionResponse { session }))
+        }
+        Err(e) => {
+            state.log_error(format!("Failed to create session: {}", e));
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create session: {}", e),
+            ))
+        }
+    }
+}
+
+/// List all sessions
+async fn list_sessions_handler(
+    State(state): State<AppState>,
+) -> Result<Json<SessionListResponse>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/sessions", "GET", "listing sessions");
+
+    match state.session_store.list_sessions(50) {
+        Ok(sessions) => {
+            let current_session_id = state.current_session.read().clone();
+            state.log_response("/api/sessions", "200", &format!("found {} sessions", sessions.len()));
+            Ok(Json(SessionListResponse {
+                sessions,
+                current_session_id,
+            }))
+        }
+        Err(e) => {
+            state.log_error(format!("Failed to list sessions: {}", e));
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to list sessions: {}", e),
+            ))
+        }
+    }
+}
+
+/// Get current session context
+async fn get_session_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Json<SessionContextResponse>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/sessions", "GET", &format!("getting session {}", session_id));
+
+    match state.session_store.get_session_context(&session_id, 50, 10) {
+        Ok(Some(context)) => {
+            state.log_response("/api/sessions", "200", &format!("session {} with {} messages", session_id, context.messages.len()));
+            Ok(Json(SessionContextResponse { context }))
+        }
+        Ok(None) => {
+            state.log_error(format!("Session not found: {}", session_id));
+            Err((
+                axum::http::StatusCode::NOT_FOUND,
+                format!("Session '{}' not found", session_id),
+            ))
+        }
+        Err(e) => {
+            state.log_error(format!("Failed to get session: {}", e));
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get session: {}", e),
+            ))
+        }
+    }
+}
+
+/// Delete a session (clear context)
+async fn delete_session_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/sessions", "DELETE", &format!("deleting session {}", session_id));
+
+    // If deleting current session, clear it
+    {
+        let mut current = state.current_session.write();
+        if current.as_ref() == Some(&session_id) {
+            *current = None;
+        }
+    }
+
+    match state.session_store.delete_session(&session_id) {
+        Ok(true) => {
+            // Record deletion in episodic memory
+            let _ = state.session_store.record_memory(
+                "session_deleted",
+                &format!("Session cleared/deleted: {}", session_id),
+                None,
+                None,
+            );
+
+            state.log_response("/api/sessions", "200", &format!("deleted session {}", session_id));
+            Ok(Json(serde_json::json!({
+                "status": "deleted",
+                "session_id": session_id
+            })))
+        }
+        Ok(false) => {
+            Err((
+                axum::http::StatusCode::NOT_FOUND,
+                format!("Session '{}' not found", session_id),
+            ))
+        }
+        Err(e) => {
+            state.log_error(format!("Failed to delete session: {}", e));
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to delete session: {}", e),
+            ))
+        }
+    }
+}
+
+/// Clear all sessions (full reset)
+async fn clear_all_sessions_handler(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/sessions/clear", "POST", "clearing all sessions");
+
+    // Clear current session
+    {
+        let mut current = state.current_session.write();
+        *current = None;
+    }
+
+    match state.session_store.clear_all_sessions() {
+        Ok(()) => {
+            // Record in episodic memory
+            let _ = state.session_store.record_memory(
+                "all_sessions_cleared",
+                "All sessions cleared - full context reset",
+                None,
+                None,
+            );
+
+            state.log_response("/api/sessions/clear", "200", "all sessions cleared");
+            Ok(Json(serde_json::json!({
+                "status": "cleared",
+                "message": "All sessions and messages cleared"
+            })))
+        }
+        Err(e) => {
+            state.log_error(format!("Failed to clear sessions: {}", e));
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to clear sessions: {}", e),
+            ))
+        }
+    }
+}
+
+/// Get messages for a session
+async fn get_session_messages_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Json<SessionMessagesResponse>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/sessions/messages", "GET", &format!("getting messages for {}", session_id));
+
+    match state.session_store.get_messages(&session_id) {
+        Ok(messages) => {
+            state.log_response("/api/sessions/messages", "200", &format!("{} messages", messages.len()));
+            Ok(Json(SessionMessagesResponse { messages }))
+        }
+        Err(e) => {
+            state.log_error(format!("Failed to get messages: {}", e));
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get messages: {}", e),
+            ))
+        }
+    }
+}
+
+/// Add a message to a session
+async fn add_message_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+    Json(body): Json<AddMessageRequest>,
+) -> Result<Json<SessionMessage>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/sessions/messages", "POST", &format!("adding message to {}", session_id));
+
+    match state.session_store.add_message(
+        &session_id,
+        &body.role,
+        &body.content,
+        body.metadata.as_deref(),
+    ) {
+        Ok(message) => {
+            state.log_response("/api/sessions/messages", "201", &format!("message {} added", message.id));
+            Ok(Json(message))
+        }
+        Err(e) => {
+            state.log_error(format!("Failed to add message: {}", e));
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to add message: {}", e),
+            ))
+        }
+    }
+}
+
+/// Chat with session context - enhanced chat endpoint
+async fn chat_with_session_handler(
+    State(state): State<AppState>,
+    Json(body): Json<ChatWithSessionRequest>,
+) -> Result<Json<ChatWithSessionResponse>, (axum::http::StatusCode, String)> {
+    let config = state.config.read();
+    let model_name = body
+        .model
+        .clone()
+        .unwrap_or_else(|| config.default_model.clone());
+    let storage_dir = config.storage_dir.clone();
+    drop(config);
+
+    let persist = body.persist.unwrap_or(true);
+
+    // Get or create session
+    let session_id = match &body.session_id {
+        Some(id) => {
+            // Verify session exists
+            match state.session_store.get_session(id) {
+                Ok(Some(_)) => id.clone(),
+                Ok(None) => {
+                    // Create new session with this ID would be complex, so create fresh
+                    let session = state.session_store.create_session(Some(&model_name), None)
+                        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                    session.id
+                }
+                Err(e) => return Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+            }
+        }
+        None => {
+            // Create new session
+            let session = state.session_store.create_session(Some(&model_name), None)
+                .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            session.id
+        }
+    };
+
+    // Update current session
+    {
+        let mut current = state.current_session.write();
+        *current = Some(session_id.clone());
+    }
+
+    state.log_request("/api/chat/session", "POST", &format!("session={}, model={}", session_id, model_name));
+
+    // Load model if needed (same as chat_handler)
+    {
+        let inference = state.inference.read();
+        let needs_load = inference
+            .as_ref()
+            .map(|i| i.model_name != model_name)
+            .unwrap_or(true);
+        drop(inference);
+
+        if needs_load && !model_name.is_empty() {
+            state.log_model("LOADING", &model_name, "initializing inference engine");
+            match load_model(&storage_dir, &model_name) {
+                Ok(engine) => {
+                    let mut inference = state.inference.write();
+                    *inference = Some(Arc::new(engine));
+                    state.log_model("READY", &model_name, "model loaded successfully");
+
+                    // Update session model
+                    let _ = state.session_store.update_session_model(&session_id, &model_name);
+                }
+                Err(e) => {
+                    state.log_error(format!("Failed to load model {}: {}", model_name, e));
+                    return Err((
+                        axum::http::StatusCode::NOT_FOUND,
+                        format!("Model '{}' not found: {}", model_name, e),
+                    ));
+                }
+            }
+        }
+    }
+
+    // Persist incoming user message if enabled
+    if persist {
+        if let Some(last_msg) = body.messages.last() {
+            if last_msg.role == "user" {
+                let _ = state.session_store.add_message(
+                    &session_id,
+                    &last_msg.role,
+                    &last_msg.content,
+                    None,
+                );
+
+                // Auto-generate title from first message
+                if body.messages.len() == 1 {
+                    let title = last_msg.content.chars().take(50).collect::<String>();
+                    let _ = state.session_store.update_session_title(&session_id, &title);
+                }
+            }
+        }
+    }
+
+    let inference = state.inference.read();
+    let engine = inference.as_ref().ok_or_else(|| {
+        state.log_error("No model loaded for inference".to_string());
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "No model loaded".to_string(),
+        )
+    })?;
+
+    // Build prompt from messages
+    let prompt = body
+        .messages
+        .iter()
+        .map(|m| {
+            let role = match m.role.as_str() {
+                "system" => "[SYSTEM]",
+                "assistant" => "[ASSISTANT]",
+                _ => "[USER]",
+            };
+            format!("{}\n{}\n", role, m.content)
+        })
+        .collect::<String>()
+        + "[ASSISTANT]\n";
+
+    let max_tokens = body
+        .options
+        .as_ref()
+        .map(|o| o.max_tokens)
+        .unwrap_or(default_max_tokens());
+
+    let start = std::time::Instant::now();
+    let output = engine.generate(&prompt, max_tokens).map_err(|e| {
+        state.log_error(format!("Inference failed: {}", e));
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Inference error: {}", e),
+        )
+    })?;
+    let elapsed = start.elapsed();
+
+    // Persist assistant response if enabled
+    if persist {
+        let _ = state.session_store.add_message(
+            &session_id,
+            "assistant",
+            &output,
+            None,
+        );
+    }
+
+    // Get updated message count
+    let message_count = state.session_store.get_session(&session_id)
+        .ok()
+        .flatten()
+        .map(|s| s.message_count)
+        .unwrap_or(0);
+
+    state.log_model("COMPLETE", &model_name, &format!("session={}, output={}B, time={:.2}s", session_id, output.len(), elapsed.as_secs_f64()));
+
+    Ok(Json(ChatWithSessionResponse {
+        model: model_name,
+        message: Message {
+            role: "assistant".to_string(),
+            content: output,
+        },
+        done: true,
+        session_id,
+        message_count,
+    }))
+}
+
+/// Get episodic memories
+async fn get_memories_handler(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<MemoryListResponse>, (axum::http::StatusCode, String)> {
+    let limit = params.get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20usize);
+    let event_type = params.get("type");
+
+    state.log_request("/api/memory", "GET", &format!("limit={}, type={:?}", limit, event_type));
+
+    let memories = match event_type {
+        Some(t) => state.session_store.get_memories_by_type(t, limit),
+        None => state.session_store.get_recent_memories(limit),
+    };
+
+    match memories {
+        Ok(memories) => {
+            state.log_response("/api/memory", "200", &format!("{} memories", memories.len()));
+            Ok(Json(MemoryListResponse { memories }))
+        }
+        Err(e) => {
+            state.log_error(format!("Failed to get memories: {}", e));
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get memories: {}", e),
+            ))
+        }
+    }
+}
+
+/// Record an episodic memory
+async fn record_memory_handler(
+    State(state): State<AppState>,
+    Json(body): Json<RecordMemoryRequest>,
+) -> Result<Json<EpisodicMemory>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/memory", "POST", &format!("type={}", body.event_type));
+
+    match state.session_store.record_memory(
+        &body.event_type,
+        &body.summary,
+        body.session_id.as_deref(),
+        body.metadata.as_deref(),
+    ) {
+        Ok(memory) => {
+            state.log_response("/api/memory", "201", &format!("memory {} recorded", memory.id));
+            Ok(Json(memory))
+        }
+        Err(e) => {
+            state.log_error(format!("Failed to record memory: {}", e));
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to record memory: {}", e),
+            ))
+        }
+    }
+}
+
+/// Clear all episodic memory
+async fn clear_memory_handler(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    state.log_request("/api/memory/clear", "POST", "clearing all memory");
+
+    match state.session_store.clear_memories() {
+        Ok(()) => {
+            state.log_response("/api/memory/clear", "200", "memory cleared");
+            Ok(Json(serde_json::json!({
+                "status": "cleared",
+                "message": "All episodic memory cleared"
+            })))
+        }
+        Err(e) => {
+            state.log_error(format!("Failed to clear memory: {}", e));
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to clear memory: {}", e),
+            ))
+        }
+    }
+}
+
 async fn index_handler() -> axum::response::Html<&'static str> {
     axum::response::Html(
         r#"<!DOCTYPE html>
@@ -1777,6 +2342,18 @@ fn router(state: AppState) -> Router {
         .route("/api/log", post(frontend_log_handler))
         .route("/api/logs", get(logs_handler))
         .route("/api/logs/stream", get(logs_stream_handler))
+        // Session & Memory Management APIs
+        .route("/api/sessions", get(list_sessions_handler))
+        .route("/api/sessions", post(create_session_handler))
+        .route("/api/sessions/clear", post(clear_all_sessions_handler))
+        .route("/api/sessions/:id", get(get_session_handler))
+        .route("/api/sessions/:id", delete(delete_session_handler))
+        .route("/api/sessions/:id/messages", get(get_session_messages_handler))
+        .route("/api/sessions/:id/messages", post(add_message_handler))
+        .route("/api/chat/session", post(chat_with_session_handler))
+        .route("/api/memory", get(get_memories_handler))
+        .route("/api/memory", post(record_memory_handler))
+        .route("/api/memory/clear", post(clear_memory_handler))
         .layer(cors)
         .with_state(state)
 }
@@ -1957,12 +2534,23 @@ async fn start_sidecar(
 
     std::fs::create_dir_all(&config.storage_dir).ok();
 
+    // Initialize session store (SQLite database)
+    let session_db_path = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("aurora")
+        .join("sessions.db");
+
+    let session_store = SessionStore::new(&session_db_path)
+        .map_err(|e| format!("Failed to initialize session store: {}", e))?;
+
     let app_state = AppState {
         logs: tx,
         log_buffer: buffer,
         inference: Arc::new(RwLock::new(None)),
         config: Arc::new(RwLock::new(config)),
         config_path,
+        session_store: Arc::new(session_store),
+        current_session: Arc::new(RwLock::new(None)),
     };
 
     match spawn_server(app_state).await {
@@ -2197,12 +2785,30 @@ fn main() {
     let config = load_config(&config_path);
     std::fs::create_dir_all(&config.storage_dir).ok();
 
+    // Initialize session store (SQLite database)
+    let session_db_path = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("aurora")
+        .join("sessions.db");
+
+    let session_store = match SessionStore::new(&session_db_path) {
+        Ok(store) => Arc::new(store),
+        Err(e) => {
+            warn!("Failed to initialize session store: {}, using in-memory fallback", e);
+            // Try with a temporary/fallback path
+            let fallback_path = std::env::temp_dir().join("aurora_sessions.db");
+            Arc::new(SessionStore::new(&fallback_path).expect("Failed to create session store"))
+        }
+    };
+
     let auto_start_state = AppState {
         logs: LogTx(Arc::new(log_tx)),
         log_buffer: log_buffer.clone(),
         inference: Arc::new(RwLock::new(None)),
         config: Arc::new(RwLock::new(config)),
         config_path,
+        session_store,
+        current_session: Arc::new(RwLock::new(None)),
     };
 
     let app = tauri::Builder::default()

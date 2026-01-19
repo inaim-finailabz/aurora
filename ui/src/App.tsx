@@ -23,6 +23,15 @@ import {
   CustomModelConfig,
   CustomModelParameters,
   ModelTemplate,
+  // Session & Memory APIs
+  Session,
+  SessionMessage,
+  createSession,
+  listSessions,
+  getSession,
+  deleteSession,
+  clearAllSessions,
+  chatWithSession,
 } from "./api";
 import "./style.css";
 import { useI18n } from "./i18n";
@@ -142,6 +151,12 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
   const [improveStatus, setImproveStatus] = useState<string>("");
   const [model, setModel] = useState(defaultModel || "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+
+  // Session management state
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [sessionHistory, setSessionHistory] = useState<Session[]>([]);
+  const [showSessionList, setShowSessionList] = useState(false);
+  const queryClient = useQueryClient();
   // Poll models every 5 seconds to pick up newly pulled models
   const models = useQuery({ queryKey: ["models"], queryFn: listModels, refetchInterval: 5000 });
   const { t } = useI18n();
@@ -180,12 +195,103 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
     }
   }, [computedCapabilities, model, selectedModel?.name]);
 
+  // Session-aware chat mutation
   const chat = useMutation({
-    mutationFn: chatOnce,
+    mutationFn: chatWithSession,
     onSuccess: (data) => {
       setMessages((prev) => [...prev, { role: "assistant", content: data.message?.content || "" }]);
+      // Update current session ID from response
+      if (data.session_id) {
+        setCurrentSessionId(data.session_id);
+      }
+      // Refresh session list
+      refreshSessions();
     },
   });
+
+  // Fetch sessions on mount
+  const sessionsQuery = useQuery({
+    queryKey: ["sessions"],
+    queryFn: listSessions,
+    refetchInterval: 10000, // Refresh every 10 seconds
+  });
+
+  // Update session history when query updates
+  useEffect(() => {
+    if (sessionsQuery.data?.sessions) {
+      setSessionHistory(sessionsQuery.data.sessions);
+      // If we have a current session from backend, use it
+      if (sessionsQuery.data.current_session_id && !currentSessionId) {
+        setCurrentSessionId(sessionsQuery.data.current_session_id);
+      }
+    }
+  }, [sessionsQuery.data]);
+
+  const refreshSessions = () => {
+    queryClient.invalidateQueries({ queryKey: ["sessions"] });
+  };
+
+  // Create new session (clear context)
+  const handleNewChat = async () => {
+    try {
+      const result = await createSession(model || defaultModel, undefined);
+      setCurrentSessionId(result.session.id);
+      setMessages([]); // Clear local messages
+      setPrompt("");
+      setAttachments([]);
+      refreshSessions();
+      logToBackend(`[SESSION] New chat session created: ${result.session.id}`);
+    } catch (err: any) {
+      logToBackend(`[SESSION] Failed to create session: ${err.message}`);
+    }
+  };
+
+  // Load a previous session
+  const handleLoadSession = async (sessionId: string) => {
+    try {
+      const result = await getSession(sessionId);
+      setCurrentSessionId(sessionId);
+      // Convert session messages to local format
+      const loadedMessages: Message[] = result.context.messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
+      setMessages(loadedMessages);
+      setShowSessionList(false);
+      logToBackend(`[SESSION] Loaded session: ${sessionId} with ${loadedMessages.length} messages`);
+    } catch (err: any) {
+      logToBackend(`[SESSION] Failed to load session: ${err.message}`);
+    }
+  };
+
+  // Delete a session
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await deleteSession(sessionId);
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId(null);
+        setMessages([]);
+      }
+      refreshSessions();
+      logToBackend(`[SESSION] Deleted session: ${sessionId}`);
+    } catch (err: any) {
+      logToBackend(`[SESSION] Failed to delete session: ${err.message}`);
+    }
+  };
+
+  // Clear all sessions
+  const handleClearAllSessions = async () => {
+    if (!window.confirm("Clear ALL chat history? This cannot be undone.")) return;
+    try {
+      await clearAllSessions();
+      setCurrentSessionId(null);
+      setMessages([]);
+      refreshSessions();
+      logToBackend(`[SESSION] All sessions cleared`);
+    } catch (err: any) {
+      logToBackend(`[SESSION] Failed to clear sessions: ${err.message}`);
+    }
+  };
   const cleanImprovedPrompt = (text: string) => {
     let s = (text || "").trim();
     // If the model returned a fenced block, extract the inner content
@@ -246,11 +352,13 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
     const newMessages: Message[] = [...messages, { role: "user" as const, content: prompt }];
     setMessages(newMessages);
 
-    // Build payload with attachments if any
+    // Build payload with session support
     const payload: any = {
+      session_id: currentSessionId || undefined, // Use existing session or create new
       model: model || defaultModel,
       messages: newMessages,
       stream: false,
+      persist: true, // Auto-persist messages to session
     };
 
     if (attachments.length > 0) {
@@ -328,11 +436,55 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Format session title for display
+  const formatSessionTitle = (session: Session) => {
+    const title = session.title || `Chat ${session.id.slice(0, 8)}`;
+    const date = new Date(session.updated_at).toLocaleDateString();
+    return `${title.slice(0, 30)}${title.length > 30 ? "..." : ""} (${date})`;
+  };
+
   return (
     <div className="panel chat-panel">
       <div className="chat-panel-header">
-        <h2>{t("chatTitle")}</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h2>{t("chatTitle")}</h2>
+          {/* New Chat Button */}
+          <button
+            className="new-chat-btn"
+            onClick={handleNewChat}
+            title="Start a new conversation (clears context)"
+            style={{
+              padding: "6px 12px",
+              fontSize: 13,
+              background: "var(--accent)",
+              color: "white",
+              border: "none",
+              borderRadius: 6,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            + New Chat
+          </button>
+          {/* Session History Toggle */}
+          <button
+            className="pick-btn"
+            onClick={() => setShowSessionList(!showSessionList)}
+            title="View chat history"
+            style={{ position: "relative" }}
+          >
+            History {sessionHistory.length > 0 && <span className="badge" style={{ marginLeft: 4 }}>{sessionHistory.length}</span>}
+          </button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {/* Current Session Indicator */}
+          {currentSessionId && (
+            <span className="status" style={{ fontSize: 11 }}>
+              Session: {currentSessionId.slice(0, 8)}...
+            </span>
+          )}
           <div className="model-select">
             <label>{t("modelLabel")}</label>
             <select className="model-select-select" value={model} onChange={(e) => setModel(e.target.value)}>
@@ -347,6 +499,64 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
           <ThemeToggle defaultTheme="light" />
         </div>
       </div>
+
+      {/* Session History Dropdown */}
+      {showSessionList && (
+        <div
+          className="session-history-panel"
+          style={{
+            background: "var(--panel-bg)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: 12,
+            marginBottom: 12,
+            maxHeight: 300,
+            overflowY: "auto",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <strong>Chat History</strong>
+            <button className="pick-btn" onClick={handleClearAllSessions} style={{ fontSize: 11 }}>
+              Clear All
+            </button>
+          </div>
+          {sessionHistory.length === 0 ? (
+            <div className="status">No previous conversations</div>
+          ) : (
+            <div className="list">
+              {sessionHistory.map((session) => (
+                <div
+                  key={session.id}
+                  className={`list-item ${session.id === currentSessionId ? "active" : ""}`}
+                  style={{
+                    padding: 8,
+                    cursor: "pointer",
+                    background: session.id === currentSessionId ? "var(--accent-light)" : undefined,
+                    borderRadius: 4,
+                  }}
+                >
+                  <div onClick={() => handleLoadSession(session.id)} style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{formatSessionTitle(session)}</div>
+                    <div className="status" style={{ fontSize: 11 }}>
+                      {session.message_count} messages · {session.model || "default model"}
+                    </div>
+                  </div>
+                  <button
+                    className="pick-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteSession(session.id);
+                    }}
+                    style={{ fontSize: 11, padding: "4px 8px" }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="chat-layout">
         <main className="chat-main">

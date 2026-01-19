@@ -357,4 +357,151 @@ export async function fetchModelInfo(repoId: string) {
   }>;
 }
 
+// ============================================================================
+// Session & Memory Management APIs
+// ============================================================================
+
+export interface Session {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  model?: string;
+  title?: string;
+  message_count: number;
+}
+
+export interface SessionMessage {
+  id: number;
+  session_id: string;
+  role: string;
+  content: string;
+  created_at: string;
+  metadata?: string;
+}
+
+export interface EpisodicMemory {
+  id: number;
+  event_type: string;
+  summary: string;
+  session_id?: string;
+  created_at: string;
+  metadata?: string;
+}
+
+export interface SessionContext {
+  session: Session;
+  messages: SessionMessage[];
+  recent_memory: EpisodicMemory[];
+}
+
+// Create a new chat session
+export async function createSession(model?: string, title?: string) {
+  return handle<{ session: Session }>(
+    await fetch(`${API_BASE}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, title }),
+    })
+  );
+}
+
+// List all sessions
+export async function listSessions() {
+  return handle<{ sessions: Session[]; current_session_id?: string }>(
+    await fetch(`${API_BASE}/api/sessions`)
+  );
+}
+
+// Get session with full context
+export async function getSession(sessionId: string) {
+  return handle<{ context: SessionContext }>(
+    await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}`)
+  );
+}
+
+// Delete a session (clear its context)
+export async function deleteSession(sessionId: string) {
+  return handle<{ status: string; session_id: string }>(
+    await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+    })
+  );
+}
+
+// Clear ALL sessions (full context reset)
+export async function clearAllSessions() {
+  return handle<{ status: string; message: string }>(
+    await fetch(`${API_BASE}/api/sessions/clear`, {
+      method: "POST",
+    })
+  );
+}
+
+// Get messages for a specific session
+export async function getSessionMessages(sessionId: string) {
+  return handle<{ messages: SessionMessage[] }>(
+    await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}/messages`)
+  );
+}
+
+// Chat with session context (auto-persists messages)
+export async function chatWithSession(payload: {
+  session_id?: string;
+  model?: string;
+  messages: Array<{ role: string; content: string }>;
+  stream?: boolean;
+  options?: { max_tokens?: number; temperature?: number; top_p?: number };
+  persist?: boolean;
+}) {
+  return handle<{
+    model: string;
+    message: { role: string; content: string };
+    done: boolean;
+    session_id: string;
+    message_count: number;
+  }>(
+    await fetch(`${API_BASE}/api/chat/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+  );
+}
+
+// Get episodic memories
+export async function getMemories(limit?: number, type?: string) {
+  const params = new URLSearchParams();
+  if (limit) params.set("limit", String(limit));
+  if (type) params.set("type", type);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return handle<{ memories: EpisodicMemory[] }>(
+    await fetch(`${API_BASE}/api/memory${query}`)
+  );
+}
+
+// Record an episodic memory
+export async function recordMemory(
+  event_type: string,
+  summary: string,
+  session_id?: string,
+  metadata?: string
+) {
+  return handle<EpisodicMemory>(
+    await fetch(`${API_BASE}/api/memory`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_type, summary, session_id, metadata }),
+    })
+  );
+}
+
+// Clear all episodic memory
+export async function clearMemory() {
+  return handle<{ status: string; message: string }>(
+    await fetch(`${API_BASE}/api/memory/clear`, {
+      method: "POST",
+    })
+  );
+}
+
 export { API_BASE };
