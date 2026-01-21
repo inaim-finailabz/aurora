@@ -47,6 +47,11 @@ import SettingsIcon from "./components/icons/SettingsIcon";
 import LogsIcon from "./components/icons/LogsIcon";
 import HelpIcon from "./components/icons/HelpIcon";
 import TerminalIcon from "./components/icons/TerminalIcon";
+import HistoryIcon from "./components/icons/HistoryIcon";
+import SendIcon from "./components/icons/SendIcon";
+import SparkleIcon from "./components/icons/SparkleIcon";
+import PlusIcon from "./components/icons/PlusIcon";
+import ChevronIcon from "./components/icons/ChevronIcon";
 import ChatMessage from "./components/ChatMessage";
 import FileUpload, { Attachment, AttachmentCapabilities, AttachmentChips } from "./components/FileUpload";
 import UninstallModal from "./components/UninstallModal";
@@ -139,7 +144,6 @@ function writeStoredCapabilities(modelName: string, caps: AttachmentCapabilities
 function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [prompt, setPrompt] = useState("");
-  const [promptName, setPromptName] = useState("");
   const [saved, setSaved] = useState<{ name: string; prompt: string }[]>(() => {
     try {
       const raw = localStorage.getItem("aurora_saved_prompts");
@@ -148,7 +152,6 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
       return [];
     }
   });
-  const [improved, setImproved] = useState<string>("");
   const [improveStatus, setImproveStatus] = useState<string>("");
   const [model, setModel] = useState(defaultModel || "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -325,7 +328,6 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
     onSuccess: (data) => {
       const response = data.response || "";
       const cleaned = cleanPrompt(response);
-      setImproved(cleaned);
       if (cleaned) {
         setPrompt(cleaned);
       }
@@ -376,7 +378,7 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
     chat.mutate(payload);
   };
 
-  const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [sideCollapsed, setSideCollapsed] = useState(true); // Start collapsed for cleaner UI
   const [sideWidth, setSideWidth] = useState<number>(() => {
     const fromStorage = localStorage.getItem("aurora_side_width");
     const n = parseInt(String(fromStorage || "320"), 10);
@@ -447,119 +449,122 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
   return (
     <div className="panel chat-panel">
       <div className="chat-panel-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h2>{t("chatTitle")}</h2>
-          {/* New Chat Button */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* New Chat Button - Icon */}
           <button
-            className="new-chat-btn"
+            className="chat-header-btn primary"
             onClick={handleNewChat}
-            title="Start a new conversation (clears context)"
-            style={{
-              padding: "6px 12px",
-              fontSize: 13,
-              background: "var(--accent)",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
+            title="Start a new conversation"
           >
-            + New Chat
+            <PlusIcon size={16} />
+            <span className="btn-label">New</span>
           </button>
-          {/* Session History Toggle */}
+          {/* Side Panel Toggle */}
           <button
-            className="pick-btn"
-            onClick={() => setShowSessionList(!showSessionList)}
-            title="View chat history"
-            style={{ position: "relative" }}
+            className={`chat-header-btn ${!sideCollapsed ? "active" : ""}`}
+            onClick={() => setSideCollapsed((v) => !v)}
+            title={sideCollapsed ? "Show saved prompts" : "Hide saved prompts"}
           >
-            History {sessionHistory.length > 0 && <span className="badge" style={{ marginLeft: 4 }}>{sessionHistory.length}</span>}
+            <ChevronIcon size={16} direction={sideCollapsed ? "left" : "right"} />
           </button>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {/* Current Session Indicator */}
           {currentSessionId && (
-            <span className="status" style={{ fontSize: 11 }}>
-              Session: {currentSessionId.slice(0, 8)}...
+            <span className="session-indicator">
+              {currentSessionId.slice(0, 6)}
             </span>
           )}
-          <div className="model-select">
-            <label>{t("modelLabel")}</label>
-            <select className="model-select-select" value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="">— choose model —</option>
-              {(models.data?.models || []).map((m) => (
-                <option key={m.name} value={m.name}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <select className="model-select-compact" value={model} onChange={(e) => setModel(e.target.value)}>
+            <option value="">Select model</option>
+            {(models.data?.models || []).map((m) => (
+              <option key={m.name} value={m.name}>
+                {m.name}
+              </option>
+            ))}
+          </select>
           <ThemeToggle defaultTheme="light" />
         </div>
       </div>
 
-      {/* Session History Dropdown */}
-      {showSessionList && (
-        <div
-          className="session-history-panel"
-          style={{
-            background: "var(--panel-bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            padding: 12,
-            marginBottom: 12,
-            maxHeight: 300,
-            overflowY: "auto",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <strong>Chat History</strong>
-            <button className="pick-btn" onClick={handleClearAllSessions} style={{ fontSize: 11 }}>
-              Clear All
+      <div className="chat-layout">
+        {/* History Side Panel */}
+        <aside className={`history-side-panel ${showSessionList ? "open" : ""}`}>
+          <div className="history-panel-header">
+            <div className="history-panel-title">
+              <HistoryIcon size={18} />
+              <span>History</span>
+            </div>
+            <button
+              className="history-close-btn"
+              onClick={() => setShowSessionList(false)}
+              title="Close history"
+            >
+              ×
             </button>
           </div>
-          {sessionHistory.length === 0 ? (
-            <div className="status">No previous conversations</div>
-          ) : (
-            <div className="list">
-              {sessionHistory.map((session) => (
-                <div
-                  key={session.id}
-                  className={`list-item ${session.id === currentSessionId ? "active" : ""}`}
-                  style={{
-                    padding: 8,
-                    cursor: "pointer",
-                    background: session.id === currentSessionId ? "var(--accent-light)" : undefined,
-                    borderRadius: 4,
-                  }}
-                >
-                  <div onClick={() => handleLoadSession(session.id)} style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{formatSessionTitle(session)}</div>
-                    <div className="status" style={{ fontSize: 11 }}>
-                      {session.message_count} messages · {session.model || "default model"}
-                    </div>
-                  </div>
-                  <button
-                    className="pick-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteSession(session.id);
-                    }}
-                    style={{ fontSize: 11, padding: "4px 8px" }}
+
+          <div className="history-panel-content">
+            {sessionHistory.length === 0 ? (
+              <div className="history-empty">
+                <HistoryIcon size={32} />
+                <p>No conversations yet</p>
+                <p className="status">Start chatting to see your history here</p>
+              </div>
+            ) : (
+              <div className="history-list">
+                {sessionHistory.map((session) => (
+                  <div
+                    key={session.id}
+                    className={`history-item ${session.id === currentSessionId ? "active" : ""}`}
+                    onClick={() => handleLoadSession(session.id)}
                   >
-                    ×
-                  </button>
-                </div>
-              ))}
+                    <div className="history-item-content">
+                      <div className="history-item-title">
+                        {formatSessionTitle(session)}
+                      </div>
+                      <div className="history-item-meta">
+                        {session.message_count} messages · {session.model || "default"}
+                      </div>
+                    </div>
+                    <button
+                      className="history-item-delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteSession(session.id);
+                      }}
+                      title="Delete conversation"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {sessionHistory.length > 0 && (
+            <div className="history-panel-footer">
+              <button className="history-clear-btn" onClick={handleClearAllSessions}>
+                Clear All History
+              </button>
             </div>
           )}
-        </div>
-      )}
+        </aside>
 
-      <div className="chat-layout">
+        {/* Floating History Toggle Button */}
+        <button
+          className={`history-toggle-btn ${showSessionList ? "hidden" : ""}`}
+          onClick={() => setShowSessionList(true)}
+          title="View chat history"
+          aria-label="View chat history"
+        >
+          <HistoryIcon size={20} />
+          {sessionHistory.length > 0 && (
+            <span className="history-badge">{sessionHistory.length}</span>
+          )}
+        </button>
+
         <main className="chat-main">
           <div className="chat-window" ref={chatWindowRef}>
             {messages.length === 0 && (
@@ -592,28 +597,6 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
 
           <AttachmentChips attachments={attachments} onRemoveAttachment={handleRemoveAttachment} />
 
-          <div className="input-row">
-            <input
-              value={promptName}
-              onChange={(e) => setPromptName(e.target.value)}
-              placeholder={t("promptName")}
-            />
-            <button
-              type="button"
-              className="pick-btn"
-              onClick={() => {
-                if (!prompt.trim()) return;
-                const entry = { name: promptName || `Prompt ${saved.length + 1}`, prompt };
-                const next = [...saved, entry];
-                setSaved(next);
-                localStorage.setItem("aurora_saved_prompts", JSON.stringify(next));
-              }}
-              disabled={!prompt.trim()}
-            >
-              {t("savePrompt")}
-            </button>
-          </div>
-
           <div className="chat-input-toolbar">
             <FileUpload
               onFilesSelected={handleFilesSelected}
@@ -623,12 +606,9 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
               capabilities={attachmentCapabilities}
               showAttachmentsInline={false}
             />
-            <button className="primary" onClick={sendPrompt} disabled={chat.isPending}>
-              {chat.isPending ? t("thinking") : t("send")}
-            </button>
             <button
               type="button"
-              className="pick-btn"
+              className="toolbar-btn improve-btn"
               onClick={() => {
                 if (!prompt.trim()) return;
                 const activeModel = model || defaultModel;
@@ -637,7 +617,6 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
                   return;
                 }
                 setImproveStatus("improving");
-                setImproved("");
                 improve.mutate({
                   model: activeModel,
                   prompt: `Improve this prompt for clarity, completeness, and specificity. Return ONLY the improved prompt text—do not answer or respond to the prompt's question. Your sole task is to rewrite the prompt to be clearer and more effective.\n\n${prompt}`,
@@ -645,16 +624,21 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
                 });
               }}
               disabled={!prompt.trim() || improve.isPending}
+              title="Improve prompt with AI"
             >
-              {improve.isPending ? t("generating") : t("improvePrompt")}
+              <SparkleIcon size={16} />
+              <span className="btn-label">{improve.isPending ? t("generating") : t("improvePrompt")}</span>
             </button>
-            {improveStatus && (
-              <span className="status" style={{ marginLeft: 8 }}>
-                {improveStatus === "improving" ? t("generating") : improveStatus === "ready" ? t("improved") : improveStatus}
-              </span>
+            {improveStatus && improveStatus !== "improving" && (
+              <span className="status-chip">{improveStatus === "ready" ? "Improved" : improveStatus}</span>
             )}
-            <span className="status" style={{ fontSize: 11 }}>Ctrl+Enter to send</span>
-            <p className="status">{chat.isError ? (chat.error as Error).message : ""}</p>
+            <div style={{ flex: 1 }} />
+            <span className="keyboard-hint">Ctrl/Cmd+Enter to send</span>
+            <button className="toolbar-btn send-btn primary" onClick={sendPrompt} disabled={chat.isPending} title="Send message">
+              <SendIcon size={18} />
+              <span className="btn-label">{chat.isPending ? t("thinking") : t("send")}</span>
+            </button>
+            {chat.isError && <p className="error-text">{(chat.error as Error).message}</p>}
           </div>
         </main>
 
@@ -722,78 +706,8 @@ function ChatPanel({ defaultModel }: { defaultModel: string | undefined }) {
               ))}
             </div>
 
-            <div className="panel">
-              <div className="input-row">
-                <button
-                  type="button"
-                  className="pick-btn"
-                  onClick={() => {
-                    if (!prompt.trim()) return;
-                    const activeModel = model || defaultModel;
-                    if (!activeModel) {
-                      setImproveStatus("Select a model first.");
-                      return;
-                    }
-                    setImproveStatus("improving");
-                    setImproved("");
-                    improve.mutate({
-                      model: activeModel,
-                      prompt: `Improve this prompt for clarity, completeness, and specificity. Return ONLY the improved prompt text—do not answer or respond to the prompt's question. Your sole task is to rewrite the prompt to be clearer and more effective.\n\n${prompt}`,
-                      stream: false,
-                    });
-                  }}
-                  disabled={!prompt.trim() || improve.isPending}
-                >
-                  {improve.isPending ? t("generating") : t("improvePrompt")}
-                </button>
-                {improveStatus && (
-                  <span className="status">
-                    {improveStatus === "improving" ? t("generating") : improveStatus === "ready" ? t("improved") : improveStatus}
-                  </span>
-                )}
-              </div>
-              {improved && <div className="message assistant">{improved}</div>}
-            </div>
-
-            <div className="panel">
-              <h3>{t("completionTitle")}</h3>
-              <CompletionPanel model={model || defaultModel || ""} />
-            </div>
           </div>
         </aside>
-      </div>
-    </div>
-  );
-}
-
-function CompletionPanel({ model }: { model: string }) {
-  const [prompt, setPrompt] = useState("");
-  const [result, setResult] = useState("");
-  const { t } = useI18n();
-  const mutation = useMutation({
-    mutationFn: generate,
-    onSuccess: (data) => setResult(data.response || ""),
-  });
-  return (
-    <div>
-      <label>{t("promptLabel")}</label>
-      <textarea rows={6} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <button
-        className="primary"
-        onClick={() =>
-          mutation.mutate({
-            model,
-            prompt,
-            stream: false,
-          })
-        }
-        disabled={!prompt.trim() || mutation.isPending}
-      >
-        {mutation.isPending ? t("generating") : t("generate")}
-      </button>
-      <div className="panel" style={{ marginTop: 12 }}>
-        <h4>{t("output")}</h4>
-        <div style={{ whiteSpace: "pre-wrap" }}>{result}</div>
       </div>
     </div>
   );

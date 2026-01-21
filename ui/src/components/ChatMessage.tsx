@@ -1,4 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import CopyIcon from "./icons/CopyIcon";
+import CheckIcon from "./icons/CheckIcon";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
@@ -214,11 +216,62 @@ function formatContent(content: string): JSX.Element[] {
 
 export default function ChatMessage({ role, content }: ChatMessageProps) {
   const formatted = useMemo(() => formatContent(content), [content]);
+  const [copied, setCopied] = useState(false);
+  const [rating, setRating] = useState<"up" | "down" | null>(null);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
 
   return (
     <div className={`message ${role}`}>
       <div className="message-header">
         <strong className="message-role">{role === "user" ? "You" : "Assistant"}</strong>
+        {role === "assistant" && (
+          <div className="message-actions">
+            <button
+              className={`message-copy-btn ${copied ? "copied" : ""}`}
+              onClick={handleCopy}
+              title={copied ? "Copied!" : "Copy message"}
+              aria-label={copied ? "Copied!" : "Copy message"}
+            >
+              {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+              <span className="copy-label">{copied ? "Copied" : "Copy"}</span>
+            </button>
+            <button
+              className={`message-action-btn ${rating === "up" ? "active" : ""}`}
+              onClick={() => setRating((current) => (current === "up" ? null : "up"))}
+              title="Thumbs up"
+              aria-label="Thumbs up"
+              aria-pressed={rating === "up"}
+              type="button"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 9V5a3 3 0 0 0-6 0v4" />
+                <path d="M7 9h11a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2H9l1 7H7l-2-9" />
+              </svg>
+            </button>
+            <button
+              className={`message-action-btn ${rating === "down" ? "active" : ""}`}
+              onClick={() => setRating((current) => (current === "down" ? null : "down"))}
+              title="Thumbs down"
+              aria-label="Thumbs down"
+              aria-pressed={rating === "down"}
+              type="button"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M10 15v4a3 3 0 0 0 6 0v-4" />
+                <path d="M17 15H6a2 2 0 0 1-2-2v-1a2 2 0 0 1 2-2h9l-1-7h3l2 9" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
       <div className="message-content">{formatted}</div>
     </div>
